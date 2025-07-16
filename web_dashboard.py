@@ -3,6 +3,8 @@ from fetch_volume import fetch_coingecko_trending, fetch_all_volumes, fetch_all_
 import plotly.graph_objs as go
 import plotly.offline as pyo
 import requests
+import csv
+import io
 
 def fetch_price(symbol):
     url = f'https://api.coingecko.com/api/v3/simple/price?ids={symbol.lower()}&vs_currencies=usd'
@@ -11,6 +13,14 @@ def fetch_price(symbol):
         return None
     data = response.json()
     return data.get(symbol.lower(), {}).get('usd')
+
+def parse_portfolio(file_storage):
+    portfolio = []
+    stream = io.StringIO(file_storage.stream.read().decode('utf-8'))
+    reader = csv.DictReader(stream)
+    for row in reader:
+        portfolio.append({'coin': row['coin'], 'amount': float(row['amount'])})
+    return portfolio
 
 app = Flask(__name__)
 
@@ -54,6 +64,27 @@ def index():
             alert_msgs.append(f'ALERT: {selected_coin.upper()} on {ex} volume {vol:,.2f} exceeds {alert_volume}')
         if alert_price and price and price > alert_price:
             alert_msgs.append(f'ALERT: {selected_coin.upper()} price {price:,.2f} exceeds {alert_price}')
+    # Portfolio tracking
+    portfolio_results = None
+    if request.method == 'POST' and 'portfolio' in request.files and request.files['portfolio'].filename:
+        portfolio = parse_portfolio(request.files['portfolio'])
+        total_value = 0
+        total_volumes = {'binance': 0, 'coinbase': 0, 'kraken': 0}
+        details = []
+        for entry in portfolio:
+            coin = entry['coin']
+            amount = entry['amount']
+            symbol = coin.upper()
+            p = fetch_price(coin)
+            vols = fetch_all_volumes(symbol)
+            value = p * amount if p else 0
+            details.append({'coin': symbol, 'amount': amount, 'price': p, 'value': value})
+            for ex in total_volumes:
+                v = vols[ex]
+                if v:
+                    total_volumes[ex] += v * amount
+            total_value += value
+        portfolio_results = {'total_value': total_value, 'total_volumes': total_volumes, 'details': details}
     return render_template_string('''
     <html>
     <head>
@@ -62,7 +93,7 @@ def index():
     </head>
     <body>
         <h1>Crypto Trading Volume Dashboard</h1>
-        <form method="post">
+        <form method="post" enctype="multipart/form-data">
             <label for="coin">Coin:</label>
             <select name="coin">
                 {% for coin in coins %}
@@ -82,6 +113,8 @@ def index():
             <input type="number" step="any" name="alert_volume" value="{{ request.form.get('alert_volume', '') }}">
             <label for="alert_price">Alert if price exceeds:</label>
             <input type="number" step="any" name="alert_price" value="{{ request.form.get('alert_price', '') }}">
+            <label for="portfolio">Upload Portfolio CSV (coin,amount):</label>
+            <input type="file" name="portfolio">
             <input type="submit" value="Update">
         </form>
         <h2>{{ selected_coin.upper() }} (Price: {{ price if price else 'N/A' }} USD)</h2>
@@ -94,9 +127,25 @@ def index():
         {% endif %}
         {{ plot_div|safe }}
         {{ trend_div|safe }}
+        {% if portfolio_results %}
+        <h2>Portfolio Tracking</h2>
+        <p>Total Portfolio Value: {{ portfolio_results.total_value | round(2) }} USD</p>
+        <p>Total Portfolio Volume (amount-weighted):</p>
+        <ul>
+            {% for ex, vol in portfolio_results.total_volumes.items() %}
+            <li>{{ ex }}: {{ vol | round(2) }}</li>
+            {% endfor %}
+        </ul>
+        <table border="1" cellpadding="5">
+            <tr><th>Coin</th><th>Amount</th><th>Price (USD)</th><th>Value (USD)</th></tr>
+            {% for d in portfolio_results.details %}
+            <tr><td>{{ d.coin }}</td><td>{{ d.amount }}</td><td>{{ d.price if d.price else 'N/A' }}</td><td>{{ d.value | round(2) }}</td></tr>
+            {% endfor %}
+        </table>
+        {% endif %}
     </body>
     </html>
-    ''', coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request)
+    ''', coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results)
 
 if __name__ == '__main__':
     app.run(debug=True) 

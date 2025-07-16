@@ -11,6 +11,14 @@ def fetch_price(symbol):
     data = response.json()
     return data.get(symbol.lower(), {}).get('usd')
 
+def load_portfolio(filename):
+    portfolio = []
+    with open(filename, newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            portfolio.append({'coin': row['coin'], 'amount': float(row['amount'])})
+    return portfolio
+
 def main():
     parser = argparse.ArgumentParser(description='Crypto Trading Volume CLI')
     parser.add_argument('--top', type=int, default=7, help='Number of trending coins to display')
@@ -20,7 +28,32 @@ def main():
     parser.add_argument('--export-csv', type=str, help='Export results to CSV file')
     parser.add_argument('--alert-volume', type=float, help='Alert if volume exceeds this value')
     parser.add_argument('--alert-price', type=float, help='Alert if price exceeds this value')
+    parser.add_argument('--portfolio', type=str, help='Path to portfolio CSV file (columns: coin,amount)')
     args = parser.parse_args()
+
+    if args.portfolio:
+        portfolio = load_portfolio(args.portfolio)
+        print('Portfolio Tracking:')
+        total_value = 0
+        total_volumes = {'binance': 0, 'coinbase': 0, 'kraken': 0}
+        for entry in portfolio:
+            coin = entry['coin']
+            amount = entry['amount']
+            symbol = coin.upper()
+            price = fetch_price(coin)
+            volumes = fetch_all_volumes(symbol)
+            value = price * amount if price else 0
+            print(f'{symbol}: {amount} coins, Price: {price if price else "N/A"} USD, Value: {value:,.2f} USD')
+            for ex in total_volumes:
+                vol = volumes[ex]
+                if vol:
+                    total_volumes[ex] += vol * amount
+            total_value += value
+        print(f'Total Portfolio Value: {total_value:,.2f} USD')
+        print('Total Portfolio Volume (amount-weighted):')
+        for ex, vol in total_volumes.items():
+            print(f'  {ex}: {vol:,.2f}')
+        return
 
     if args.coin:
         coins = [args.coin]
