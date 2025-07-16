@@ -18,6 +18,8 @@ def main():
     parser.add_argument('--exchange', type=str, choices=['binance', 'coinbase', 'kraken', 'all'], default='all', help='Exchange to query')
     parser.add_argument('--trend', action='store_true', help='Show 7-day historical volume trend')
     parser.add_argument('--export-csv', type=str, help='Export results to CSV file')
+    parser.add_argument('--alert-volume', type=float, help='Alert if volume exceeds this value')
+    parser.add_argument('--alert-price', type=float, help='Alert if price exceeds this value')
     args = parser.parse_args()
 
     if args.coin:
@@ -39,6 +41,11 @@ def main():
                     hist = fetch_all_historical(symbol)
                     row['trend'] = hist[ex]
                 rows.append(row)
+                # Alert logic
+                if args.alert_volume and vol and vol > args.alert_volume:
+                    print(f'  ALERT: {symbol} on {ex} volume {vol:,.2f} exceeds {args.alert_volume}')
+                if args.alert_price and price and price > args.alert_price:
+                    print(f'  ALERT: {symbol} price {price:,.2f} exceeds {args.alert_price}')
         else:
             vol = volumes.get(args.exchange)
             print(f'  {args.exchange}: {vol if vol else "Not found"}')
@@ -47,6 +54,11 @@ def main():
                 hist = fetch_all_historical(symbol)
                 row['trend'] = hist.get(args.exchange)
             rows.append(row)
+            # Alert logic
+            if args.alert_volume and vol and vol > args.alert_volume:
+                print(f'  ALERT: {symbol} on {args.exchange} volume {vol:,.2f} exceeds {args.alert_volume}')
+            if args.alert_price and price and price > args.alert_price:
+                print(f'  ALERT: {symbol} price {price:,.2f} exceeds {args.alert_price}')
         if args.trend:
             hist = fetch_all_historical(symbol)
             print('  7-day volume trend:')

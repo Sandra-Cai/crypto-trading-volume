@@ -20,6 +20,8 @@ def index():
     selected_coin = request.form.get('coin', trending[0])
     selected_exchange = request.form.get('exchange', 'all')
     show_trend = request.form.get('trend', 'off') == 'on'
+    alert_volume = request.form.get('alert_volume', type=float)
+    alert_price = request.form.get('alert_price', type=float)
     coins = trending
     volumes = fetch_all_volumes(selected_coin.upper())
     price = fetch_price(selected_coin)
@@ -44,6 +46,14 @@ def index():
                     trend_fig.add_trace(go.Scatter(x=list(range(len(ma))), y=ma, mode='lines', name=f'{ex} 3-day MA'))
                 trend_fig.update_layout(title=f'{selected_coin.upper()} 7-Day Volume Trend ({ex})', xaxis_title='Days Ago', yaxis_title='Volume')
                 trend_div += pyo.plot(trend_fig, output_type='div', include_plotlyjs=False)
+    # Alert logic
+    alert_msgs = []
+    for ex in exchanges:
+        vol = volumes[ex]
+        if alert_volume and vol and vol > alert_volume:
+            alert_msgs.append(f'ALERT: {selected_coin.upper()} on {ex} volume {vol:,.2f} exceeds {alert_volume}')
+        if alert_price and price and price > alert_price:
+            alert_msgs.append(f'ALERT: {selected_coin.upper()} price {price:,.2f} exceeds {alert_price}')
     return render_template_string('''
     <html>
     <head>
@@ -68,14 +78,25 @@ def index():
             </select>
             <label for="trend">Show 7-day trend</label>
             <input type="checkbox" name="trend" {% if show_trend %}checked{% endif %}>
+            <label for="alert_volume">Alert if volume exceeds:</label>
+            <input type="number" step="any" name="alert_volume" value="{{ request.form.get('alert_volume', '') }}">
+            <label for="alert_price">Alert if price exceeds:</label>
+            <input type="number" step="any" name="alert_price" value="{{ request.form.get('alert_price', '') }}">
             <input type="submit" value="Update">
         </form>
         <h2>{{ selected_coin.upper() }} (Price: {{ price if price else 'N/A' }} USD)</h2>
+        {% if alert_msgs %}
+        <div style="color: red; font-weight: bold;">
+            {% for msg in alert_msgs %}
+            <div>{{ msg }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
         {{ plot_div|safe }}
         {{ trend_div|safe }}
     </body>
     </html>
-    ''', coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price)
+    ''', coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request)
 
 if __name__ == '__main__':
     app.run(debug=True) 
