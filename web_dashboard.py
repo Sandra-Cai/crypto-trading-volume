@@ -1,10 +1,16 @@
-from flask import Flask, render_template_string, request
+from flask import Flask, render_template_string, request, redirect, url_for, session
 from fetch_volume import fetch_coingecko_trending, fetch_all_volumes, fetch_all_historical
 import plotly.graph_objs as go
 import plotly.offline as pyo
 import requests
 import csv
 import io
+
+app = Flask(__name__)
+app.secret_key = 'supersecretkey'  # Change this in production
+
+USERNAME = 'user'
+PASSWORD = 'pass'
 
 def fetch_price(symbol):
     url = f'https://api.coingecko.com/api/v3/simple/price?ids={symbol.lower()}&vs_currencies=usd'
@@ -22,9 +28,43 @@ def parse_portfolio(file_storage):
         portfolio.append({'coin': row['coin'], 'amount': float(row['amount'])})
     return portfolio
 
-app = Flask(__name__)
+def login_required(f):
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('logged_in'):
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    error = None
+    if request.method == 'POST':
+        if request.form['username'] == USERNAME and request.form['password'] == PASSWORD:
+            session['logged_in'] = True
+            return redirect(url_for('index'))
+        else:
+            error = 'Invalid credentials'
+    return render_template_string('''
+    <html><head><title>Login</title></head><body>
+    <h2>Login</h2>
+    {% if error %}<div style="color:red">{{ error }}</div>{% endif %}
+    <form method="post">
+        <label>Username:</label><input type="text" name="username"><br>
+        <label>Password:</label><input type="password" name="password"><br>
+        <input type="submit" value="Login">
+    </form>
+    </body></html>
+    ''', error=error)
+
+@app.route('/logout')
+def logout():
+    session.pop('logged_in', None)
+    return redirect(url_for('login'))
 
 @app.route('/', methods=['GET', 'POST'])
+@login_required
 def index():
     trending = fetch_coingecko_trending()
     selected_coin = request.form.get('coin', trending[0])
@@ -36,13 +76,11 @@ def index():
     volumes = fetch_all_volumes(selected_coin.upper())
     price = fetch_price(selected_coin)
     hist = fetch_all_historical(selected_coin.upper()) if show_trend else None
-    # Bar chart for current volumes
     exchanges = ['binance', 'coinbase', 'kraken'] if selected_exchange == 'all' else [selected_exchange]
     bar = go.Bar(x=exchanges, y=[volumes[ex] if volumes[ex] else 0 for ex in exchanges])
     layout = go.Layout(title=f'{selected_coin.upper()} 24h Trading Volume', xaxis=dict(title='Exchange'), yaxis=dict(title='Volume'))
     fig = go.Figure(data=[bar], layout=layout)
     plot_div = pyo.plot(fig, output_type='div', include_plotlyjs=False)
-    # Historical trend chart
     trend_div = ''
     if show_trend and hist:
         for ex in exchanges:
@@ -50,13 +88,11 @@ def index():
             if vols:
                 trend_fig = go.Figure()
                 trend_fig.add_trace(go.Scatter(x=list(range(len(vols))), y=vols, mode='lines+markers', name=f'{ex} volume'))
-                # Moving average
                 if len(vols) >= 3:
                     ma = [sum(vols[max(0,i-2):i+1])/min(i+1,3) for i in range(len(vols))]
                     trend_fig.add_trace(go.Scatter(x=list(range(len(ma))), y=ma, mode='lines', name=f'{ex} 3-day MA'))
                 trend_fig.update_layout(title=f'{selected_coin.upper()} 7-Day Volume Trend ({ex})', xaxis_title='Days Ago', yaxis_title='Volume')
                 trend_div += pyo.plot(trend_fig, output_type='div', include_plotlyjs=False)
-    # Alert logic
     alert_msgs = []
     for ex in exchanges:
         vol = volumes[ex]
@@ -64,7 +100,6 @@ def index():
             alert_msgs.append(f'ALERT: {selected_coin.upper()} on {ex} volume {vol:,.2f} exceeds {alert_volume}')
         if alert_price and price and price > alert_price:
             alert_msgs.append(f'ALERT: {selected_coin.upper()} price {price:,.2f} exceeds {alert_price}')
-    # Portfolio tracking
     portfolio_results = None
     if request.method == 'POST' and 'portfolio' in request.files and request.files['portfolio'].filename:
         portfolio = parse_portfolio(request.files['portfolio'])
@@ -92,6 +127,7 @@ def index():
         <title>Crypto Trading Volume Dashboard</title>
     </head>
     <body>
+        <div style="float:right"><a href="{{ url_for('logout') }}">Logout</a></div>
         <h1>Crypto Trading Volume Dashboard</h1>
         <form method="post" enctype="multipart/form-data">
             <label for="coin">Coin:</label>
