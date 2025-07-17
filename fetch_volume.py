@@ -1,6 +1,7 @@
 import requests
 from datetime import datetime, timedelta
 import time
+import statistics
 
 # --- Simple in-memory cache ---
 _cache = {}
@@ -137,20 +138,176 @@ def fetch_kraken_historical(symbol, days=7):
         cache_set(key, [])
         return []
 
-# --- Aggregated fetch ---
+# --- KuCoin ---
+def fetch_kucoin_volume(symbol):
+    key = f'kucoin_volume_{symbol}'
+    cached = cache_get(key)
+    if cached is not None:
+        return cached
+    url = f'https://api.kucoin.com/api/v1/market/stats?symbol={symbol.upper()}-USDT'
+    response = requests.get(url)
+    if response.status_code != 200:
+        cache_set(key, None)
+        return None
+    data = response.json()
+    try:
+        volume = float(data['data']['volValue'])
+        cache_set(key, volume)
+        return volume
+    except Exception:
+        cache_set(key, None)
+        return None
+
+def fetch_kucoin_historical(symbol, days=7):
+    key = f'kucoin_hist_{symbol}_{days}'
+    cached = cache_get(key)
+    if cached is not None:
+        return cached
+    url = f'https://api.kucoin.com/api/v1/market/candles?type=1day&symbol={symbol.upper()}-USDT&limit={days}'
+    response = requests.get(url)
+    if response.status_code != 200:
+        cache_set(key, [])
+        return []
+    data = response.json()
+    try:
+        result = [float(day[6]) for day in data['data']]
+        cache_set(key, result)
+        return result
+    except Exception:
+        cache_set(key, [])
+        return []
+
+# --- OKX ---
+def fetch_okx_volume(symbol):
+    key = f'okx_volume_{symbol}'
+    cached = cache_get(key)
+    if cached is not None:
+        return cached
+    url = f'https://www.okx.com/api/v5/market/ticker?instId={symbol.upper()}-USDT'
+    response = requests.get(url)
+    if response.status_code != 200:
+        cache_set(key, None)
+        return None
+    data = response.json()
+    try:
+        volume = float(data['data']['volCcy24h'])
+        cache_set(key, volume)
+        return volume
+    except Exception:
+        cache_set(key, None)
+        return None
+
+def fetch_okx_historical(symbol, days=7):
+    key = f'okx_hist_{symbol}_{days}'
+    cached = cache_get(key)
+    if cached is not None:
+        return cached
+    url = f'https://www.okx.com/api/v5/market/candles?instId={symbol.upper()}-USDT&bar=1D&limit={days}'
+    response = requests.get(url)
+    if response.status_code != 200:
+        cache_set(key, [])
+        return []
+    data = response.json()
+    try:
+        result = [float(day[6]) for day in data['data']]
+        cache_set(key, result)
+        return result
+    except Exception:
+        cache_set(key, [])
+        return []
+
+# --- Bybit ---
+def fetch_bybit_volume(symbol):
+    key = f'bybit_volume_{symbol}'
+    cached = cache_get(key)
+    if cached is not None:
+        return cached
+    url = f'https://api.bybit.com/v5/market/tickers?category=spot&symbol={symbol.upper()}USDT'
+    response = requests.get(url)
+    if response.status_code != 200:
+        cache_set(key, None)
+        return None
+    data = response.json()
+    try:
+        volume = float(data['result']['list'][0]['volume24h'])
+        cache_set(key, volume)
+        return volume
+    except Exception:
+        cache_set(key, None)
+        return None
+
+def fetch_bybit_historical(symbol, days=7):
+    key = f'bybit_hist_{symbol}_{days}'
+    cached = cache_get(key)
+    if cached is not None:
+        return cached
+    url = f'https://api.bybit.com/v5/market/kline?category=spot&symbol={symbol.upper()}USDT&interval=D&limit={days}'
+    response = requests.get(url)
+    if response.status_code != 200:
+        cache_set(key, [])
+        return []
+    data = response.json()
+    try:
+        result = [float(day[5]) for day in data['result']['list']]
+        cache_set(key, result)
+        return result
+    except Exception:
+        cache_set(key, [])
+        return []
+
+# --- Enhanced Aggregated fetch ---
 def fetch_all_volumes(symbol):
     return {
         'binance': fetch_binance_volume(symbol),
         'coinbase': fetch_coinbase_volume(symbol),
-        'kraken': fetch_kraken_volume(symbol)
+        'kraken': fetch_kraken_volume(symbol),
+        'kucoin': fetch_kucoin_volume(symbol),
+        'okx': fetch_okx_volume(symbol),
+        'bybit': fetch_bybit_volume(symbol)
     }
 
 def fetch_all_historical(symbol, days=7):
     return {
         'binance': fetch_binance_historical(symbol, days),
         'coinbase': fetch_coinbase_historical(symbol, days),
-        'kraken': fetch_kraken_historical(symbol, days)
+        'kraken': fetch_kraken_historical(symbol, days),
+        'kucoin': fetch_kucoin_historical(symbol, days),
+        'okx': fetch_okx_historical(symbol, days),
+        'bybit': fetch_bybit_historical(symbol, days)
     }
+
+# --- Volume Spike Detection ---
+def detect_volume_spike(historical_volumes, threshold=20):
+    """Detect if current volume is significantly higher than average"""
+    if not historical_volumes or len(historical_volumes) < 3:
+        return False, 0.0
+    
+    current_volume = historical_volumes[-1]
+    avg_volume = statistics.mean(historical_volumes[:-1])
+    
+    if avg_volume == 0:
+        return False, 0.0
+    spike_ratio = current_volume / avg_volume
+    return spike_ratio > threshold, spike_ratio
+
+# --- Price-Volume Correlation ---
+def calculate_price_volume_correlation(prices, volumes):
+    """Calculate correlation between price and volume changes"""
+    if len(prices) != len(volumes) or len(prices) < 2:
+        return 0
+    
+    # Calculate percentage changes
+    price_changes = [(prices[i] - prices[i-1])/prices[i-1] for i in range(1, len(prices))]
+    volume_changes = [(volumes[i] - volumes[i-1])/volumes[i-1] for i in range(1, len(volumes))]
+    
+    if len(price_changes) < 2:
+        return 0
+    
+    try:
+        correlation = statistics.correlation(price_changes, volume_changes)
+        return correlation
+    except:
+        return 0
 
 # --- Main for testing ---
 def main():
@@ -173,6 +330,10 @@ def main():
         hist = fetch_all_historical(symbol)
         for ex, vols in hist.items():
             print(f'{ex}: {vols}')
+            if vols:
+                is_spike, ratio = detect_volume_spike(vols)
+                if is_spike:
+                    print(f'  VOLUME SPIKE DETECTED! Current volume is {ratio:.2f}x average')
 
 if __name__ == '__main__':
     main() 

@@ -1,5 +1,5 @@
 import argparse
-from fetch_volume import fetch_coingecko_trending, fetch_all_volumes, fetch_all_historical
+from fetch_volume import fetch_coingecko_trending, fetch_all_volumes, fetch_all_historical, detect_volume_spike, calculate_price_volume_correlation
 import requests
 import csv
 
@@ -10,6 +10,14 @@ def fetch_price(symbol):
         return None
     data = response.json()
     return data.get(symbol.lower(), {}).get('usd')
+
+def fetch_price_history(symbol, days=7):
+    url = f'https://api.coingecko.com/api/v3/coins/{symbol.lower()}/market_chart?vs_currency=usd&days={days}'
+    response = requests.get(url)
+    if response.status_code != 200:
+        return []
+    data = response.json()
+    return [price[1] for price in data['prices']]
 
 def load_portfolio(filename):
     portfolio = []
@@ -23,19 +31,21 @@ def main():
     parser = argparse.ArgumentParser(description='Crypto Trading Volume CLI')
     parser.add_argument('--top', type=int, default=7, help='Number of trending coins to display')
     parser.add_argument('--coin', type=str, help='Specify a coin (e.g., bitcoin)')
-    parser.add_argument('--exchange', type=str, choices=['binance', 'coinbase', 'kraken', 'all'], default='all', help='Exchange to query')
+    parser.add_argument('--exchange', type=str, choices=['binance', 'coinbase', 'kraken', 'kucoin', 'okx', 'bybit', 'all'], default='all', help='Exchange to query')
     parser.add_argument('--trend', action='store_true', help='Show 7-day historical volume trend')
     parser.add_argument('--export-csv', type=str, help='Export results to CSV file')
     parser.add_argument('--alert-volume', type=float, help='Alert if volume exceeds this value')
     parser.add_argument('--alert-price', type=float, help='Alert if price exceeds this value')
     parser.add_argument('--portfolio', type=str, help='Path to portfolio CSV file (columns: coin,amount)')
+    parser.add_argument('--detect-spikes', action='store_true', help='Detect volume spikes (20rage)')
+    parser.add_argument('--correlation', action='store_true', help='Calculate price-volume correlation')
     args = parser.parse_args()
 
     if args.portfolio:
         portfolio = load_portfolio(args.portfolio)
         print('Portfolio Tracking:')
         total_value = 0
-        total_volumes = {'binance': 0, 'coinbase': 0, 'kraken': 0}
+        total_volumes = {'binance': 0, 'coinbase': 0, 'kraken': 0, 'kucoin': 0, 'okx': 0, 'bybit': 0}
         for entry in portfolio:
             coin = entry['coin']
             amount = entry['amount']
@@ -66,6 +76,7 @@ def main():
         volumes = fetch_all_volumes(symbol)
         price = fetch_price(coin)
         print(f'{symbol} (Price: {price if price else "N/A"} USD):')
+        
         if args.exchange == 'all':
             for ex, vol in volumes.items():
                 print(f'  {ex}: {vol if vol else "Not found"}')
@@ -92,14 +103,39 @@ def main():
                 print(f'  ALERT: {symbol} on {args.exchange} volume {vol:,.2f} exceeds {args.alert_volume}')
             if args.alert_price and price and price > args.alert_price:
                 print(f'  ALERT: {symbol} price {price:,.2f} exceeds {args.alert_price}')
+        
         if args.trend:
             hist = fetch_all_historical(symbol)
             print('  7-day volume trend:')
             if args.exchange == 'all':
                 for ex, vols in hist.items():
                     print(f'    {ex}: {vols}')
+                    if args.detect_spikes and vols:
+                        is_spike, ratio = detect_volume_spike(vols)
+                        if is_spike:
+                            print(f'      SPIKE DETECTED! Current volume is {ratio:.2f}x average')
             else:
-                print(f'    {args.exchange}: {hist.get(args.exchange)}')
+                vols = hist.get(args.exchange)
+                print(f'    {args.exchange}: {vols}')
+                if args.detect_spikes and vols:
+                    is_spike, ratio = detect_volume_spike(vols)
+                    if is_spike:
+                        print(f'      SPIKE DETECTED! Current volume is {ratio:.2f}x average')
+        
+        if args.correlation:
+            price_history = fetch_price_history(coin)
+            hist = fetch_all_historical(symbol)
+            if args.exchange == 'all':
+                for ex, vols in hist.items():
+                    if price_history and vols and len(price_history) == len(vols):
+                        correlation = calculate_price_volume_correlation(price_history, vols)
+                        print(f'    {ex} price-volume correlation: {correlation:0.3f}')
+            else:
+                vols = hist.get(args.exchange)
+                if price_history and vols and len(price_history) == len(vols):
+                    correlation = calculate_price_volume_correlation(price_history, vols)
+                    print(f'    {args.exchange} price-volume correlation: {correlation:.3f}')
+    
     # Export to CSV
     if args.export_csv:
         with open(args.export_csv, 'w', newline='') as csvfile:
