@@ -1,16 +1,21 @@
 from flask import Flask, render_template_string, request, redirect, url_for, session
 from fetch_volume import fetch_coingecko_trending, fetch_all_volumes, fetch_all_historical, detect_volume_spike, calculate_price_volume_correlation
+from trading_bot import TradingBot, create_strategy_config
 import plotly.graph_objs as go
 import plotly.offline as pyo
 import requests
 import csv
 import io
+import threading
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Change this in production
 
 USERNAME = 'user'
 PASSWORD = 'pass'
+
+# Store bot instance in global dict (for demo, not production)
+bot_instances = {}
 
 def fetch_price(symbol):
     url = f'https://api.coingecko.com/api/v3/simple/price?ids={symbol.lower()}&vs_currencies=usd'
@@ -72,6 +77,38 @@ def login():
 def logout():
     session.pop('logged_in', None)
     return redirect(url_for('login'))
+
+@app.route('/bot', methods=['POST'])
+def bot_control():
+    action = request.form.get('bot_action')
+    coin = request.form.get('bot_coin')
+    strategy = request.form.get('bot_strategy')
+    session_id = session.get('user_id', 'default')
+    if action == 'start' and coin:
+        config = create_strategy_config()
+        if strategy == 'volume_spike':
+            config['rsi_enabled'] = False
+            config['price_alerts_enabled'] = False
+        elif strategy == 'rsi':
+            config['volume_spike_enabled'] = False
+            config['price_alerts_enabled'] = False
+        elif strategy == 'price_alerts':
+            config['volume_spike_enabled'] = False
+            config['rsi_enabled'] = False
+        bot = TradingBot(config, demo_mode=True)
+        bot_instances[session_id] = bot
+        t = threading.Thread(target=bot.start, args=(coin,))
+        t.daemon = True
+        t.start()
+        session['bot_running'] = True
+        session['bot_coin'] = coin
+        session['bot_strategy'] = strategy
+    elif action == 'stop':
+        bot = bot_instances.get(session_id)
+        if bot:
+            bot.stop()
+        session['bot_running'] = False
+    return redirect(url_for('index'))
 
 @app.route('/', methods=['GET', 'POST'])
 @login_required
@@ -151,6 +188,15 @@ def index():
                     total_volumes[ex] += v * amount
             total_value += value
         portfolio_results = {'total_value': total_value, 'total_volumes': total_volumes, 'details': details}
+    
+    # Trading bot state
+    session_id = session.get('user_id', 'default')
+    bot = bot_instances.get(session_id)
+    bot_running = session.get('bot_running', False)
+    bot_coin = session.get('bot_coin', '')
+    bot_strategy = session.get('bot_strategy', 'all')
+    bot_portfolio = bot.get_portfolio_value() if bot and bot_running else None
+    bot_trades = bot.trade_history if bot and bot_running else []
     
     return render_template_string('''
     <html>
@@ -281,9 +327,50 @@ def index():
         </table>
         </div>
         {% endif %}
+        <h2>Trading Bot (Demo Mode)</h2>
+        <form method="post" action="/bot" class="row g-3 mb-4">
+            <div class="col-12 col-md-3">
+                <label for="bot_coin" class="form-label">Coin:</label>
+                <select name="bot_coin" class="form-select">
+                    {% for coin in coins %}
+                    <option value="{{ coin }}" {% if coin == bot_coin %}selected{% endif %}>{{ coin.upper() }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-3">
+                <label for="bot_strategy" class="form-label">Strategy:</label>
+                <select name="bot_strategy" class="form-select">
+                    <option value="all" {% if bot_strategy == 'all' %}selected{% endif %}>All</option>
+                    <option value="volume_spike" {% if bot_strategy == 'volume_spike' %}selected{% endif %}>Volume Spike</option>
+                    <option value="rsi" {% if bot_strategy == 'rsi' %}selected{% endif %}>RSI</option>
+                    <option value="price_alerts" {% if bot_strategy == 'price_alerts' %}selected{% endif %}>Price Alerts</option>
+                </select>
+            </div>
+            <div class="col-12 col-md-2 d-flex align-items-end">
+                {% if bot_running %}
+                <button class="btn btn-danger w-100" name="bot_action" value="stop" type="submit">Stop Bot</button>
+                {% else %}
+                <button class="btn btn-success w-100" name="bot_action" value="start" type="submit">Start Bot</button>
+                {% endif %}
+            </div>
+        </form>
+        {% if bot_running %}
+        <div class="alert alert-info">Bot running for <b>{{ bot_coin.upper() }}</b> (Strategy: <b>{{ bot_strategy }}</b>)<br>Portfolio Value: <b>${{ bot_portfolio|round(2) }}</b></div>
+        <h5>Trade Log</h5>
+        <div class="table-responsive">
+        <table class="table table-bordered table-striped">
+            <thead><tr><th>Time</th><th>Action</th><th>Coin</th><th>Amount</th><th>Price</th><th>Reason</th><th>Portfolio Value</th></tr></thead>
+            <tbody>
+            {% for trade in bot_trades %}
+            <tr><td>{{ trade.timestamp }}</td><td>{{ trade.action }}</td><td>{{ trade.coin }}</td><td>{{ trade.amount }}</td><td>{{ trade.price }}</td><td>{{ trade.reason }}</td><td>{{ trade.portfolio_value|round(2) }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% endif %}
     </body>
     </html>
-    ''', coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live)
+    ''', coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades)
 
 if __name__ == '__main__':
     app.run(debug=True) 
