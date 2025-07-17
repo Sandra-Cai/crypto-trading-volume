@@ -11,6 +11,7 @@ import csv
 import asyncio
 import websockets
 import json
+from backtest import backtest_volume_spike, backtest_rsi
 
 def fetch_price(symbol):
     url = f'https://api.coingecko.com/api/v3/simple/price?ids={symbol.lower()}&vs_currencies=usd'
@@ -71,7 +72,19 @@ def main():
     parser.add_argument('--live', action='store_true', help='Stream real-time price/volume updates (Binance only)')
     parser.add_argument('--bot', action='store_true', help='Start automated trading bot (DEMO MODE)')
     parser.add_argument('--bot-strategy', type=str, choices=['volume_spike', 'rsi', 'price_alerts', 'all'], default='all', help='Trading strategy to use')
+    parser.add_argument('--backtest', action='store_true', help='Run backtest on historical data')
+    parser.add_argument('--backtest-strategy', type=str, choices=['volume_spike', 'rsi'], default='volume_spike', help='Backtest strategy to use')
     args = parser.parse_args()
+
+    if args.backtest:
+        if not args.coin:
+            print('Error: --coin is required for backtesting')
+            return
+        if args.backtest_strategy == 'volume_spike':
+            backtest_volume_spike(args.coin)
+        elif args.backtest_strategy == 'rsi':
+            backtest_rsi(args.coin)
+        return
 
     if args.bot:
         if not args.coin:
