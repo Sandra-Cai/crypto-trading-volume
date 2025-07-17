@@ -1,0 +1,9 @@
+version: 3.8services:
+  crypto-trading-volume:
+    build: .
+    ports:
+      - "5000:5000
+    environment:
+      - FLASK_ENV=production
+      - FLASK_APP=web_dashboard.py
+    restart: unless-stopped 
