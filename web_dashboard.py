@@ -335,6 +335,24 @@ def settings():
     </body></html>
     ''', telegram_id=telegram_id, discord_webhook=discord_webhook)
 
+# --- Advanced Analytics: Whale Alerts & On-chain Metrics ---
+def fetch_whale_alerts(coin):
+    # For demo, use Whale Alert public API (mock if no API key)
+    # https://docs.whale-alert.io/
+    # We'll mock with a static example for now
+    if coin.lower() == 'bitcoin':
+        return [
+            {'amount': 1200, 'from': 'ExchangeA', 'to': 'Wallet', 'timestamp': '2024-05-01 12:00', 'txid': 'abc123'},
+            {'amount': 800, 'from': 'Wallet', 'to': 'ExchangeB', 'timestamp': '2024-05-01 10:30', 'txid': 'def456'},
+        ]
+    return []
+
+def fetch_onchain_stats(coin):
+    # For demo, mock some stats
+    if coin.lower() == 'bitcoin':
+        return {'active_addresses': 950000, 'large_transfers': 120, 'total_volume': 3500000}
+    return {'active_addresses': 0, 'large_transfers': 0, 'total_volume': 0}
+
 @app.route('/', methods=['GET', 'POST'])
 @login_required
 def index():
@@ -440,6 +458,10 @@ def index():
     # News aggregation
     news_headlines = fetch_news(selected_coin)
     news_with_sentiment = [(headline, simple_sentiment(headline)) for headline in news_headlines]
+
+    # Advanced analytics
+    whale_alerts = fetch_whale_alerts(selected_coin)
+    onchain_stats = fetch_onchain_stats(selected_coin)
 
     return render_template_string('''
     <html>
@@ -672,9 +694,30 @@ def index():
             <li class="list-group-item">No news found for this coin.</li>
             {% endif %}
         </ul>
+        <h2>Advanced Analytics</h2>
+        <div class="mb-3">
+            <b>On-chain Stats:</b><br>
+            Active Addresses: {{ onchain_stats.active_addresses }}<br>
+            Large Transfers: {{ onchain_stats.large_transfers }}<br>
+            Total Volume: {{ onchain_stats.total_volume }}
+        </div>
+        <div class="mb-3">
+            <b>Recent Whale Transactions:</b>
+            <ul class="list-group">
+                {% for tx in whale_alerts %}
+                <li class="list-group-item">
+                    <b>{{ tx.amount }}</b> {{ selected_coin.upper() }} from {{ tx.from }} to {{ tx.to }} at {{ tx.timestamp }}<br>
+                    TxID: {{ tx.txid }}
+                </li>
+                {% endfor %}
+                {% if not whale_alerts %}
+                <li class="list-group-item">No recent whale transactions found.</li>
+                {% endif %}
+            </ul>
+        </div>
     </body>
     </html>
-    ''', t=t, lang=lang, coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days, user_favorites=user_favorites, news_with_sentiment=news_with_sentiment)
+    ''', t=t, lang=lang, coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days, user_favorites=user_favorites, news_with_sentiment=news_with_sentiment, whale_alerts=whale_alerts, onchain_stats=onchain_stats)
 
 if __name__ == '__main__':
     init_db() # Initialize database on startup
