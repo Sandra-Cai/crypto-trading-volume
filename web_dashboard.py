@@ -281,6 +281,60 @@ def simple_sentiment(text):
         return 'negative'
     return 'neutral'
 
+# --- Telegram/Discord Integration ---
+def send_telegram_alert(chat_id, message, bot_token):
+    url = f'https://api.telegram.org/bot{bot_token}/sendMessage'
+    data = {'chat_id': chat_id, 'text': message}
+    try:
+        requests.post(url, data=data)
+    except Exception:
+        pass
+
+def send_discord_alert(webhook_url, message):
+    data = {'content': message}
+    try:
+        requests.post(webhook_url, json=data)
+    except Exception:
+        pass
+
+# --- Update user DB for alert settings ---
+def add_alert_settings_column():
+    with app.app_context():
+        db = get_db()
+        db.execute('''ALTER TABLE users ADD COLUMN telegram_id TEXT''')
+        db.execute('''ALTER TABLE users ADD COLUMN discord_webhook TEXT''')
+        db.commit()
+
+# --- Settings page for alerts ---
+@app.route('/settings', methods=['GET', 'POST'])
+@login_required
+def settings():
+    user_id = session.get('user_id')
+    db = get_db()
+    error = None
+    if request.method == 'POST':
+        telegram_id = request.form.get('telegram_id', '')
+        discord_webhook = request.form.get('discord_webhook', '')
+        db.execute('UPDATE users SET telegram_id = ?, discord_webhook = ? WHERE id = ?', (telegram_id, discord_webhook, user_id))
+        db.commit()
+        return redirect(url_for('settings'))
+    row = query_db('SELECT telegram_id, discord_webhook FROM users WHERE id = ?', [user_id], one=True)
+    telegram_id = row[0] if row else ''
+    discord_webhook = row[1] if row else ''
+    return render_template_string('''
+    <html><head><title>Alert Settings</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    </head><body class="container py-5">
+    <h2>Alert Settings</h2>
+    <form method="post" class="w-100 w-md-50 mx-auto">
+        <div class="mb-3"><label class="form-label">Telegram Chat ID:</label><input class="form-control" type="text" name="telegram_id" value="{{ telegram_id }}"></div>
+        <div class="mb-3"><label class="form-label">Discord Webhook URL:</label><input class="form-control" type="text" name="discord_webhook" value="{{ discord_webhook }}"></div>
+        <button class="btn btn-primary" type="submit">Save</button>
+    </form>
+    <div class="mt-3"><a href="{{ url_for('index') }}">Back to Dashboard</a></div>
+    </body></html>
+    ''', telegram_id=telegram_id, discord_webhook=discord_webhook)
+
 @app.route('/', methods=['GET', 'POST'])
 @login_required
 def index():
