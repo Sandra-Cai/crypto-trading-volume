@@ -47,13 +47,15 @@ def login():
         else:
             error = 'Invalid credentials'
     return render_template_string('''
-    <html><head><title>Login</title></head><body>
+    <html><head><title>Login</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    </head><body class="container py-5">
     <h2>Login</h2>
-    {% if error %}<div style="color:red">{{ error }}</div>{% endif %}
-    <form method="post">
-        <label>Username:</label><input type="text" name="username"><br>
-        <label>Password:</label><input type="password" name="password"><br>
-        <input type="submit" value="Login">
+    {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+    <form method="post" class="w-100 w-md-50 mx-auto">
+        <div class="mb-3"><label class="form-label">Username:</label><input class="form-control" type="text" name="username"></div>
+        <div class="mb-3"><label class="form-label">Password:</label><input class="form-control" type="password" name="password"></div>
+        <button class="btn btn-primary" type="submit">Login</button>
     </form>
     </body></html>
     ''', error=error)
@@ -123,61 +125,83 @@ def index():
     return render_template_string('''
     <html>
     <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
         <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
         <title>Crypto Trading Volume Dashboard</title>
     </head>
-    <body>
-        <div style="float:right"><a href="{{ url_for('logout') }}">Logout</a></div>
-        <h1>Crypto Trading Volume Dashboard</h1>
-        <form method="post" enctype="multipart/form-data">
-            <label for="coin">Coin:</label>
-            <select name="coin">
-                {% for coin in coins %}
-                <option value="{{ coin }}" {% if coin == selected_coin %}selected{% endif %}>{{ coin.upper() }}</option>
-                {% endfor %}
-            </select>
-            <label for="exchange">Exchange:</label>
-            <select name="exchange">
-                <option value="all" {% if selected_exchange == 'all' %}selected{% endif %}>All</option>
-                <option value="binance" {% if selected_exchange == 'binance' %}selected{% endif %}>Binance</option>
-                <option value="coinbase" {% if selected_exchange == 'coinbase' %}selected{% endif %}>Coinbase</option>
-                <option value="kraken" {% if selected_exchange == 'kraken' %}selected{% endif %}>Kraken</option>
-            </select>
-            <label for="trend">Show 7-day trend</label>
-            <input type="checkbox" name="trend" {% if show_trend %}checked{% endif %}>
-            <label for="alert_volume">Alert if volume exceeds:</label>
-            <input type="number" step="any" name="alert_volume" value="{{ request.form.get('alert_volume', '') }}">
-            <label for="alert_price">Alert if price exceeds:</label>
-            <input type="number" step="any" name="alert_price" value="{{ request.form.get('alert_price', '') }}">
-            <label for="portfolio">Upload Portfolio CSV (coin,amount):</label>
-            <input type="file" name="portfolio">
-            <input type="submit" value="Update">
+    <body class="container py-3">
+        <div class="d-flex justify-content-end mb-2"><a href="{{ url_for('logout') }}" class="btn btn-outline-secondary">Logout</a></div>
+        <h1 class="mb-4">Crypto Trading Volume Dashboard</h1>
+        <form method="post" enctype="multipart/form-data" class="row g-3 mb-4">
+            <div class="col-12 col-md-3">
+                <label for="coin" class="form-label">Coin:</label>
+                <select name="coin" class="form-select">
+                    {% for coin in coins %}
+                    <option value="{{ coin }}" {% if coin == selected_coin %}selected{% endif %}>{{ coin.upper() }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-3">
+                <label for="exchange" class="form-label">Exchange:</label>
+                <select name="exchange" class="form-select">
+                    <option value="all" {% if selected_exchange == 'all' %}selected{% endif %}>All</option>
+                    <option value="binance" {% if selected_exchange == 'binance' %}selected{% endif %}>Binance</option>
+                    <option value="coinbase" {% if selected_exchange == 'coinbase' %}selected{% endif %}>Coinbase</option>
+                    <option value="kraken" {% if selected_exchange == 'kraken' %}selected{% endif %}>Kraken</option>
+                </select>
+            </div>
+            <div class="col-12 col-md-2 d-flex align-items-end">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="trend" {% if show_trend %}checked{% endif %}>
+                    <label class="form-check-label" for="trend">Show 7-day trend</label>
+                </div>
+            </div>
+            <div class="col-12 col-md-2">
+                <label for="alert_volume" class="form-label">Alert if volume exceeds:</label>
+                <input class="form-control" type="number" step="any" name="alert_volume" value="{{ request.form.get('alert_volume', '') }}">
+            </div>
+            <div class="col-12 col-md-2">
+                <label for="alert_price" class="form-label">Alert if price exceeds:</label>
+                <input class="form-control" type="number" step="any" name="alert_price" value="{{ request.form.get('alert_price', '') }}">
+            </div>
+            <div class="col-12 col-md-4">
+                <label for="portfolio" class="form-label">Upload Portfolio CSV (coin,amount):</label>
+                <input class="form-control" type="file" name="portfolio">
+            </div>
+            <div class="col-12 col-md-2 d-flex align-items-end">
+                <button class="btn btn-primary w-100" type="submit">Update</button>
+            </div>
         </form>
-        <h2>{{ selected_coin.upper() }} (Price: {{ price if price else 'N/A' }} USD)</h2>
+        <h2 class="mb-3">{{ selected_coin.upper() }} (Price: {{ price if price else 'N/A' }} USD)</h2>
         {% if alert_msgs %}
-        <div style="color: red; font-weight: bold;">
+        <div class="alert alert-danger">
             {% for msg in alert_msgs %}
             <div>{{ msg }}</div>
             {% endfor %}
         </div>
         {% endif %}
-        {{ plot_div|safe }}
-        {{ trend_div|safe }}
+        <div class="mb-4">{{ plot_div|safe }}</div>
+        <div class="mb-4">{{ trend_div|safe }}</div>
         {% if portfolio_results %}
         <h2>Portfolio Tracking</h2>
-        <p>Total Portfolio Value: {{ portfolio_results.total_value | round(2) }} USD</p>
+        <p>Total Portfolio Value: <strong>{{ portfolio_results.total_value | round(2) }} USD</strong></p>
         <p>Total Portfolio Volume (amount-weighted):</p>
         <ul>
             {% for ex, vol in portfolio_results.total_volumes.items() %}
             <li>{{ ex }}: {{ vol | round(2) }}</li>
             {% endfor %}
         </ul>
-        <table border="1" cellpadding="5">
-            <tr><th>Coin</th><th>Amount</th><th>Price (USD)</th><th>Value (USD)</th></tr>
+        <div class="table-responsive">
+        <table class="table table-bordered table-striped">
+            <thead><tr><th>Coin</th><th>Amount</th><th>Price (USD)</th><th>Value (USD)</th></tr></thead>
+            <tbody>
             {% for d in portfolio_results.details %}
             <tr><td>{{ d.coin }}</td><td>{{ d.amount }}</td><td>{{ d.price if d.price else 'N/A' }}</td><td>{{ d.value | round(2) }}</td></tr>
             {% endfor %}
+            </tbody>
         </table>
+        </div>
         {% endif %}
     </body>
     </html>
