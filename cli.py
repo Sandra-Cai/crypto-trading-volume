@@ -7,6 +7,9 @@ from fetch_volume import (
 )
 import requests
 import csv
+import asyncio
+import websockets
+import json
 
 def fetch_price(symbol):
     url = f'https://api.coingecko.com/api/v3/simple/price?ids={symbol.lower()}&vs_currencies=usd'
@@ -32,6 +35,21 @@ def load_portfolio(filename):
             portfolio.append({'coin': row['coin'], 'amount': float(row['amount'])})
     return portfolio
 
+async def binance_live_stream(symbol):
+    ws_url = f"wss://stream.binance.com:9443/ws/{symbol.lower()}usdt@ticker"
+    async with websockets.connect(ws_url) as websocket:
+        print(f"Streaming live price/volume for {symbol.upper()}USDT on Binance. Press Ctrl+C to stop.")
+        try:
+            while True:
+                msg = await websocket.recv()
+                data = json.loads(msg)
+                price = data.get('c')
+                volume = data.get('v')
+                print(f"Price: {price} USDT | 24h Volume: {volume}", flush=True)
+        except KeyboardInterrupt:
+            print("\nLive stream stopped.")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Crypto Trading Volume CLI')
     parser.add_argument('--top', type=int, default=7, help='Number of trending coins to display')
@@ -49,7 +67,13 @@ def main():
     parser.add_argument('--technical', action='store_true', help='Show technical indicators (RSI, MACD)')
     parser.add_argument('--arbitrage', action='store_true', help='Detect arbitrage opportunities')
     parser.add_argument('--dominance', action='store_true', help='Show market dominance data')
+    parser.add_argument('--live', action='store_true', help='Stream real-time price/volume updates (Binance only)')
     args = parser.parse_args()
+
+    if args.live:
+        symbol = args.coin if args.coin else 'BTC'
+        asyncio.run(binance_live_stream(symbol))
+        return
 
     if args.dominance:
         print('Market Dominance Analysis:')
