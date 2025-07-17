@@ -80,6 +80,7 @@ def index():
     selected_coin = request.form.get('coin', trending[0])
     selected_exchange = request.form.get('exchange', 'all')
     show_trend = request.form.get('trend', 'off') == 'on'
+    live = request.form.get('live', 'off') == 'on'
     alert_volume = request.form.get('alert_volume', type=float)
     alert_price = request.form.get('alert_price', type=float)
     detect_spikes = request.form.get('detect_spikes', 'off') == 'on'
@@ -214,6 +215,12 @@ def index():
                 <input class="form-control" type="file" name="portfolio">
             </div>
             <div class="col-12 col-md-2 d-flex align-items-end">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="live" {% if live %}checked{% endif %}>
+                    <label class="form-check-label" for="live">Live (Binance)</label>
+                </div>
+            </div>
+            <div class="col-12 col-md-2 d-flex align-items-end">
                 <button class="btn btn-primary w-100" type="submit">Update</button>
             </div>
         </form>
@@ -241,7 +248,18 @@ def index():
             {% endfor %}
         </div>
         {% endif %}
-        <div class="mb-4">{{ plot_div|safe }}</div>
+        <div class="mb-4" id="live-chart">{{ plot_div|safe }}</div>
+        {% if live and selected_exchange == 'binance' %}
+        <script>
+        const ws = new WebSocket('wss://stream.binance.com:9443/ws/{{ selected_coin.lower() }}usdt@ticker');
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            const price = data.c;
+            const volume = data.v;
+            document.getElementById('live-chart').innerHTML = `<div class='alert alert-info'>Live Price: <b>${price}</b> USDT | 24h Volume: <b>${volume}</b></div>`;
+        };
+        </script>
+        {% endif %}
         <div class="mb-4">{{ trend_div|safe }}</div>
         {% if portfolio_results %}
         <h2>Portfolio Tracking</h2>
@@ -265,7 +283,7 @@ def index():
         {% endif %}
     </body>
     </html>
-    ''', coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation)
+    ''', coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live)
 
 if __name__ == '__main__':
     app.run(debug=True) 
