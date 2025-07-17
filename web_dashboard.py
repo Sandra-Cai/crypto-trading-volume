@@ -259,6 +259,28 @@ def backtest_control():
     session['backtest_days'] = days
     return redirect(url_for('index'))
 
+# --- News Aggregation & Sentiment ---
+def fetch_news(coin):
+    # Use CryptoPanic or NewsAPI for demo (CryptoPanic is free for headlines)
+    url = f'https://cryptopanic.com/api/v1/posts/?auth_token=demo&currencies={coin.lower()}'
+    try:
+        resp = requests.get(url)
+        if resp.status_code == 200:
+            data = resp.json()
+            return [item['title'] for item in data.get('results', [])]
+    except Exception:
+        pass
+    return []
+
+def simple_sentiment(text):
+    # Very basic sentiment: positive if contains 'up', 'bull', negative if 'down', 'bear', else neutral
+    text = text.lower()
+    if any(word in text for word in ['up', 'bull', 'gain', 'surge', 'rise', 'positive']):
+        return 'positive'
+    if any(word in text for word in ['down', 'bear', 'loss', 'drop', 'fall', 'negative']):
+        return 'negative'
+    return 'neutral'
+
 @app.route('/', methods=['GET', 'POST'])
 @login_required
 def index():
@@ -361,6 +383,10 @@ def index():
             user_favorites = row[0].split(',') if row[0] else []
 
     lang = session.get('lang', 'en')
+    # News aggregation
+    news_headlines = fetch_news(selected_coin)
+    news_with_sentiment = [(headline, simple_sentiment(headline)) for headline in news_headlines]
+
     return render_template_string('''
     <html>
     <head>
@@ -578,9 +604,23 @@ def index():
             </select>
             <button class="btn btn-primary mt-2" type="submit">{{ t('save_favorites') }}</button>
         </form>
+        <h2>News & Sentiment</h2>
+        <ul class="list-group mb-4">
+            {% for headline, sentiment in news_with_sentiment %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                {{ headline }}
+                {% if sentiment == 'positive' %}<span class="badge bg-success">Positive</span>{% endif %}
+                {% if sentiment == 'negative' %}<span class="badge bg-danger">Negative</span>{% endif %}
+                {% if sentiment == 'neutral' %}<span class="badge bg-secondary">Neutral</span>{% endif %}
+            </li>
+            {% endfor %}
+            {% if not news_with_sentiment %}
+            <li class="list-group-item">No news found for this coin.</li>
+            {% endif %}
+        </ul>
     </body>
     </html>
-    ''', t=t, lang=lang, coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days, user_favorites=user_favorites)
+    ''', t=t, lang=lang, coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days, user_favorites=user_favorites, news_with_sentiment=news_with_sentiment)
 
 if __name__ == '__main__':
     init_db() # Initialize database on startup
