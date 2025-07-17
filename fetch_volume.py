@@ -3,6 +3,8 @@ from datetime import datetime, timedelta
 import time
 import statistics
 import json
+import asyncio
+import aiohttp
 
 # --- Simple in-memory cache ---
 _cache = {}
@@ -17,21 +19,28 @@ def cache_get(key):
 def cache_set(key, value):
     _cache[key] = {'value': value, 'time': time.time()}
 
-# --- Market Data from CoinGecko ---
-def fetch_market_data(symbol):
-    """Fetch comprehensive market data including market cap, price change, etc."""
+# --- Async HTTP Session Context ---
+class AiohttpSession:
+    def __init__(self):
+        self.session = None
+    async def __aenter__(self):
+        self.session = aiohttp.ClientSession()
+        return self.session
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.session.close()
+
+# --- Async Market Data from CoinGecko ---
+async def fetch_market_data_async(symbol, session):
     key = f'market_data_{symbol}'
     cached = cache_get(key)
     if cached:
         return cached
-    
     url = f'https://api.coingecko.com/api/v3/coins/{symbol.lower()}'
-    response = requests.get(url)
-    if response.status_code != 200:
-        cache_set(key, None)
-        return None
-    
-    data = response.json()
+    async with session.get(url) as response:
+        if response.status != 200:
+            cache_set(key, None)
+            return None
+        data = await response.json()
     market_data = {
         'market_cap': data['market_data']['market_cap']['usd'],
         'price_change_24h': data['market_data']['price_change_percentage_24h'],
@@ -44,37 +53,54 @@ def fetch_market_data(symbol):
     cache_set(key, market_data)
     return market_data
 
-def fetch_market_dominance():
-    """Fetch top cryptocurrencies by market dominance"""
+def fetch_market_data(symbol):
+    """Synchronous wrapper for async fetch_market_data_async"""
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_market_data_async(symbol, session)
+    return asyncio.run(wrapper())
+
+# --- Async Market Dominance ---
+async def fetch_market_dominance_async(session):
     key = 'market_dominance'
     cached = cache_get(key)
     if cached:
         return cached
-    
     url = 'https://api.coingecko.com/api/v3/global'
-    response = requests.get(url)
-    if response.status_code != 200:
-        cache_set(key, None)
-        return None
-    
-    data = response.json()
+    async with session.get(url) as response:
+        if response.status != 200:
+            cache_set(key, None)
+            return None
+        data = await response.json()
     dominance = data['data']['market_cap_percentage']
     cache_set(key, dominance)
     return dominance
 
-# --- Trending coins from CoinGecko ---
-def fetch_coingecko_trending():
+def fetch_market_dominance():
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_market_dominance_async(session)
+    return asyncio.run(wrapper())
+
+# --- Async Trending coins from CoinGecko ---
+async def fetch_coingecko_trending_async(session):
     key = 'coingecko_trending'
     cached = cache_get(key)
     if cached:
         return cached
     url = 'https://api.coingecko.com/api/v3/search/trending'
-    response = requests.get(url)
-    response.raise_for_status()
-    data = response.json()
+    async with session.get(url) as response:
+        response.raise_for_status()
+        data = await response.json()
     trending = [item['item']['id'] for item in data['coins']]
     cache_set(key, trending)
     return trending
+
+def fetch_coingecko_trending():
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_coingecko_trending_async(session)
+    return asyncio.run(wrapper())
 
 # --- Social Sentiment Analysis (Mock) ---
 def fetch_social_sentiment(symbol):
@@ -179,8 +205,8 @@ def detect_arbitrage_opportunities(symbol):
     
     return []
 
-def fetch_price_from_exchange(symbol, exchange):
-    """Fetch price from specific exchange"""
+# --- Async Price from Exchange ---
+async def fetch_price_from_exchange_async(symbol, exchange, session):
     if exchange == 'binance':
         url = f'https://api.binance.com/api/v3/ticker/price?symbol={symbol.upper()}USDT'
     elif exchange == 'coinbase':
@@ -191,12 +217,10 @@ def fetch_price_from_exchange(symbol, exchange):
         url = f'https://api.kraken.com/0/public/Ticker?pair={kraken_symbol}'
     else:
         return None
-    
-    response = requests.get(url)
-    if response.status_code != 200:
-        return None
-    
-    data = response.json()
+    async with session.get(url) as response:
+        if response.status != 200:
+            return None
+        data = await response.json()
     try:
         if exchange == 'binance':
             return float(data['price'])
@@ -205,158 +229,150 @@ def fetch_price_from_exchange(symbol, exchange):
         elif exchange == 'kraken':
             pair = list(data['result'].keys())[0]
             return float(data['result'][pair]['c'][0])
-    except:
+    except Exception:
         return None
-    
-    return None
 
-# --- Binance ---
-def fetch_binance_volume(symbol):
-    key = f'binance_volume_{symbol}'
-    cached = cache_get(key)
-    if cached is not None:
-        return cached
+def fetch_price_from_exchange(symbol, exchange):
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_price_from_exchange_async(symbol, exchange, session)
+    return asyncio.run(wrapper())
+
+# --- Async Volume/Historical for Each Exchange ---
+async def fetch_binance_volume_async(symbol, session):
     url = f'https://api.binance.com/api/v3/ticker/24hr?symbol={symbol.upper()}USDT'
-    response = requests.get(url)
-    if response.status_code != 200:
-        cache_set(key, None)
-        return None
-    data = response.json()
-    volume = float(data.get('quoteVolume', 0))
-    cache_set(key, volume)
-    return volume
+    async with session.get(url) as response:
+        if response.status != 200:
+            return None
+        data = await response.json()
+    return float(data['quoteVolume'])
+
+def fetch_binance_volume(symbol):
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_binance_volume_async(symbol, session)
+    return asyncio.run(wrapper())
+
+async def fetch_binance_historical_async(symbol, days, session):
+    url = f'https://api.binance.com/api/v3/klines?symbol={symbol.upper()}USDT&interval=1d&limit={days}'
+    async with session.get(url) as response:
+        if response.status != 200:
+            return []
+        data = await response.json()
+    result = [float(day[7]) for day in data]
+    return result
 
 def fetch_binance_historical(symbol, days=7):
-    key = f'binance_hist_{symbol}_{days}'
-    cached = cache_get(key)
-    if cached is not None:
-        return cached
-    url = f'https://api.binance.com/api/v3/klines?symbol={symbol.upper()}USDT&interval=1d&limit={days}'
-    response = requests.get(url)
-    if response.status_code != 200:
-        cache_set(key, [])
-        return []
-    data = response.json()
-    result = [float(day[7]) for day in data]
-    cache_set(key, result)
-    return result
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_binance_historical_async(symbol, days, session)
+    return asyncio.run(wrapper())
 
-# --- Coinbase ---
-def fetch_coinbase_volume(symbol):
-    key = f'coinbase_volume_{symbol}'
-    cached = cache_get(key)
-    if cached is not None:
-        return cached
+async def fetch_coinbase_volume_async(symbol, session):
     url = f'https://api.pro.coinbase.com/products/{symbol.upper()}-USD/stats'
-    response = requests.get(url)
-    if response.status_code != 200:
-        cache_set(key, None)
-        return None
-    data = response.json()
-    volume = float(data.get('volume', 0))
-    cache_set(key, volume)
-    return volume
+    async with session.get(url) as response:
+        if response.status != 200:
+            return None
+        data = await response.json()
+    return float(data.get('volume', 0))
+
+def fetch_coinbase_volume(symbol):
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_coinbase_volume_async(symbol, session)
+    return asyncio.run(wrapper())
+
+async def fetch_coinbase_historical_async(symbol, days, session):
+    url = f'https://api.pro.coinbase.com/products/{symbol.upper()}-USD/candles?granularity=86400&limit={days}'
+    async with session.get(url) as response:
+        if response.status != 200:
+            return []
+        data = await response.json()
+    result = [float(day[5]) for day in data]
+    return result
 
 def fetch_coinbase_historical(symbol, days=7):
-    key = f'coinbase_hist_{symbol}_{days}'
-    cached = cache_get(key)
-    if cached is not None:
-        return cached
-    url = f'https://api.pro.coinbase.com/products/{symbol.upper()}-USD/candles?granularity=86400&limit={days}'
-    response = requests.get(url)
-    if response.status_code != 200:
-        cache_set(key, [])
-        return []
-    data = response.json()
-    result = [float(day[5]) for day in data]
-    cache_set(key, result)
-    return result
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_coinbase_historical_async(symbol, days, session)
+    return asyncio.run(wrapper())
 
-# --- Kraken ---
-def fetch_kraken_volume(symbol):
-    key = f'kraken_volume_{symbol}'
-    cached = cache_get(key)
-    if cached is not None:
-        return cached
+async def fetch_kraken_volume_async(symbol, session):
     kraken_map = {'BTC': 'XBT', 'ETH': 'ETH', 'SOL': 'SOL', 'DOGE': 'DOGE', 'ADA': 'ADA', 'XRP': 'XRP'}
     kraken_symbol = kraken_map.get(symbol.upper(), symbol.upper()) + 'USD'
     url = f'https://api.kraken.com/0/public/Ticker?pair={kraken_symbol}'
-    response = requests.get(url)
-    if response.status_code != 200:
-        cache_set(key, None)
-        return None
-    data = response.json()
+    async with session.get(url) as response:
+        if response.status != 200:
+            return None
+        data = await response.json()
     try:
         pair = list(data['result'].keys())[0]
         volume = float(data['result'][pair]['v'][1])
-        cache_set(key, volume)
         return volume
     except Exception:
-        cache_set(key, None)
         return None
 
-def fetch_kraken_historical(symbol, days=7):
-    key = f'kraken_hist_{symbol}_{days}'
-    cached = cache_get(key)
-    if cached is not None:
-        return cached
+def fetch_kraken_volume(symbol):
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_kraken_volume_async(symbol, session)
+    return asyncio.run(wrapper())
+
+async def fetch_kraken_historical_async(symbol, days, session):
     kraken_map = {'BTC': 'XBT', 'ETH': 'ETH', 'SOL': 'SOL', 'DOGE': 'DOGE', 'ADA': 'ADA', 'XRP': 'XRP'}
     kraken_symbol = kraken_map.get(symbol.upper(), symbol.upper()) + 'USD'
     url = f'https://api.kraken.com/0/public/OHLC?pair={kraken_symbol}&interval=1440'
-    response = requests.get(url)
-    if response.status_code != 200:
-        cache_set(key, [])
-        return []
-    data = response.json()
+    async with session.get(url) as response:
+        if response.status != 200:
+            return []
+        data = await response.json()
     try:
         pair = list(data['result'].keys())[0]
         ohlc = data['result'][pair][-days:]
         result = [float(day[6]) for day in ohlc]
-        cache_set(key, result)
         return result
     except Exception:
-        cache_set(key, [])
         return []
 
-# --- KuCoin ---
-def fetch_kucoin_volume(symbol):
-    key = f'kucoin_volume_{symbol}'
-    cached = cache_get(key)
-    if cached is not None:
-        return cached
+def fetch_kraken_historical(symbol, days=7):
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_kraken_historical_async(symbol, days, session)
+    return asyncio.run(wrapper())
+
+async def fetch_kucoin_volume_async(symbol, session):
     url = f'https://api.kucoin.com/api/v1/market/stats?symbol={symbol.upper()}-USDT'
-    response = requests.get(url)
-    if response.status_code != 200:
-        cache_set(key, None)
-        return None
-    data = response.json()
+    async with session.get(url) as response:
+        if response.status != 200:
+            return None
+        data = await response.json()
     try:
         volume = float(data['data']['volValue'])
-        cache_set(key, volume)
         return volume
     except Exception:
-        cache_set(key, None)
         return None
 
-def fetch_kucoin_historical(symbol, days=7):
-    key = f'kucoin_hist_{symbol}_{days}'
-    cached = cache_get(key)
-    if cached is not None:
-        return cached
+def fetch_kucoin_volume(symbol):
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_kucoin_volume_async(symbol, session)
+    return asyncio.run(wrapper())
+
+async def fetch_kucoin_historical_async(symbol, days, session):
     url = f'https://api.kucoin.com/api/v1/market/candles?type=1day&symbol={symbol.upper()}-USDT&limit={days}'
-    response = requests.get(url)
-    if response.status_code != 200:
-        cache_set(key, [])
-        return []
-    data = response.json()
+    async with session.get(url) as response:
+        if response.status != 200:
+            return []
+        data = await response.json()
     try:
         result = [float(day[6]) for day in data['data']]
-        cache_set(key, result)
         return result
     except Exception:
-        cache_set(key, [])
         return []
 
+def fetch_kucoin_historical(symbol, days=7):
+    async def wrapper():
+        async with AiohttpSession() as session:
 # --- OKX ---
 def fetch_okx_volume(symbol):
     key = f'okx_volume_{symbol}'
