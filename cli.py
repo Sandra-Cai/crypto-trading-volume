@@ -191,7 +191,7 @@ def main():
                     
                     macd, signal, hist_macd = calculate_macd(vols)
                     if macd:
-                        print(f     MACD: [object Object]macd:.2f}, Signal: {signal:0.2, Histogram: {hist_macd:.2f}')
+                        print(f'      MACD: {macd:.2f}, Signal: {signal:.2f}, Histogram: {hist_macd:.2f}')
         
         if args.correlation:
             price_history = fetch_price_history(coin)
