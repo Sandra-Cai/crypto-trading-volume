@@ -5,6 +5,7 @@ from fetch_volume import (
     fetch_social_sentiment, calculate_rsi, calculate_macd, detect_arbitrage_opportunities,
     fetch_market_dominance
 )
+from trading_bot import TradingBot, create_strategy_config
 import requests
 import csv
 import asyncio
@@ -68,7 +69,38 @@ def main():
     parser.add_argument('--arbitrage', action='store_true', help='Detect arbitrage opportunities')
     parser.add_argument('--dominance', action='store_true', help='Show market dominance data')
     parser.add_argument('--live', action='store_true', help='Stream real-time price/volume updates (Binance only)')
+    parser.add_argument('--bot', action='store_true', help='Start automated trading bot (DEMO MODE)')
+    parser.add_argument('--bot-strategy', type=str, choices=['volume_spike', 'rsi', 'price_alerts', 'all'], default='all', help='Trading strategy to use')
     args = parser.parse_args()
+
+    if args.bot:
+        if not args.coin:
+            print("Error: --coin is required when using --bot")
+            return
+        
+        print(f"Starting trading bot for {args.coin} in DEMO MODE")
+        print("WARNING: This is for educational purposes only. No real money will be traded.")
+        
+        config = create_strategy_config()
+        
+        # Customize strategy based on user preference
+        if args.bot_strategy == 'volume_spike':
+            config['rsi_enabled'] = False
+            config['price_alerts_enabled'] = False
+        elif args.bot_strategy == 'rsi':
+            config['volume_spike_enabled'] = False
+            config['price_alerts_enabled'] = False
+        elif args.bot_strategy == 'price_alerts':
+            config['volume_spike_enabled'] = False
+            config['rsi_enabled'] = False
+        
+        bot = TradingBot(config, demo_mode=True)
+        
+        try:
+            bot.start(args.coin)
+        except KeyboardInterrupt:
+            bot.stop()
+        return
 
     if args.live:
         symbol = args.coin if args.coin else 'BTC'
