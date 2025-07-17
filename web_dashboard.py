@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, redirect, url_for, session
+from flask import Flask, render_template_string, request, redirect, url_for, session, g
 from fetch_volume import fetch_coingecko_trending, fetch_all_volumes, fetch_all_historical, detect_volume_spike, calculate_price_volume_correlation
 from trading_bot import TradingBot, create_strategy_config
 import plotly.graph_objs as go
@@ -7,56 +7,81 @@ import requests
 import csv
 import io
 import threading
-from backtest import backtest_volume_spike, backtest_rsi
+import sqlite3
+import hashlib
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Change this in production
+DATABASE = 'users.db'
 
-USERNAME = 'user'
-PASSWORD = 'pass'
+# --- User DB helpers ---
+def get_db():
+    db = getattr(g, '_database', None)
+    if db is None:
+        db = g._database = sqlite3.connect(DATABASE)
+    return db
 
-# Store bot instance in global dict (for demo, not production)
-bot_instances = {}
+def query_db(query, args=(), one=False):
+    cur = get_db().execute(query, args)
+    rv = cur.fetchall()
+    cur.close()
+    return (rv[0] if rv else None) if one else rv
 
-def fetch_price(symbol):
-    url = f'https://api.coingecko.com/api/v3/simple/price?ids={symbol.lower()}&vs_currencies=usd'
-    response = requests.get(url)
-    if response.status_code != 200:
-        return None
-    data = response.json()
-    return data.get(symbol.lower(), {}).get('usd')
+def init_db():
+    with app.app_context():
+        db = get_db()
+        db.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT UNIQUE, password TEXT, favorites TEXT)''')
+        db.commit()
 
-def fetch_price_history(symbol, days=7):
-    url = f'https://api.coingecko.com/api/v3/coins/{symbol.lower()}/market_chart?vs_currency=usd&days={days}'
-    response = requests.get(url)
-    if response.status_code != 200:
-        return []
-    data = response.json()
-    return [price[1] for price in data['prices']]
+@app.teardown_appcontext
+def close_connection(exception):
+    db = getattr(g, '_database', None)
+    if db is not None:
+        db.close()
 
-def parse_portfolio(file_storage):
-    portfolio = []
-    stream = io.StringIO(file_storage.stream.read().decode('utf-8'))
-    reader = csv.DictReader(stream)
-    for row in reader:
-        portfolio.append({'coin': row['coin'], 'amount': float(row['amount'])})
-    return portfolio
-
-def login_required(f):
-    from functools import wraps
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not session.get('logged_in'):
+# --- Registration ---
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    error = None
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        hashed = hashlib.sha256(password.encode()).hexdigest()
+        try:
+            db = get_db()
+            db.execute('INSERT INTO users (username, password, favorites) VALUES (?, ?, ?)', (username, hashed, ''))
+            db.commit()
             return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated_function
+        except sqlite3.IntegrityError:
+            error = 'Username already exists.'
+    return render_template_string('''
+    <html><head><title>Register</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    </head><body class="container py-5">
+    <h2>Register</h2>
+    {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+    <form method="post" class="w-100 w-md-50 mx-auto">
+        <div class="mb-3"><label class="form-label">Username:</label><input class="form-control" type="text" name="username"></div>
+        <div class="mb-3"><label class="form-label">Password:</label><input class="form-control" type="password" name="password"></div>
+        <button class="btn btn-primary" type="submit">Register</button>
+    </form>
+    <div class="mt-3">Already have an account? <a href="{{ url_for('login') }}">Login</a></div>
+    </body></html>
+    ''', error=error)
 
+# --- Login (update to use DB) ---
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     error = None
     if request.method == 'POST':
-        if request.form['username'] == USERNAME and request.form['password'] == PASSWORD:
+        username = request.form['username']
+        password = request.form['password']
+        hashed = hashlib.sha256(password.encode()).hexdigest()
+        user = query_db('SELECT * FROM users WHERE username = ? AND password = ?', [username, hashed], one=True)
+        if user:
             session['logged_in'] = True
+            session['user_id'] = user[0]
+            session['username'] = username
             return redirect(url_for('index'))
         else:
             error = 'Invalid credentials'
@@ -71,13 +96,36 @@ def login():
         <div class="mb-3"><label class="form-label">Password:</label><input class="form-control" type="password" name="password"></div>
         <button class="btn btn-primary" type="submit">Login</button>
     </form>
+    <div class="mt-3">Don't have an account? <a href="{{ url_for('register') }}">Register</a></div>
     </body></html>
     ''', error=error)
 
 @app.route('/logout')
 def logout():
     session.pop('logged_in', None)
+    session.pop('user_id', None)
+    session.pop('username', None)
     return redirect(url_for('login'))
+
+# --- Favorite coins (profile) ---
+@app.route('/favorites', methods=['POST'])
+@login_required
+def save_favorites():
+    user_id = session.get('user_id')
+    favorites = request.form.getlist('favorites')
+    db = get_db()
+    db.execute('UPDATE users SET favorites = ? WHERE id = ?', (','.join(favorites), user_id))
+    db.commit()
+    return redirect(url_for('index'))
+
+def login_required(f):
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('logged_in'):
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 @app.route('/bot', methods=['POST'])
 def bot_control():
@@ -227,6 +275,14 @@ def index():
     backtest_coin = session.pop('backtest_coin', '')
     backtest_strategy = session.pop('backtest_strategy', 'volume_spike')
     backtest_days = session.pop('backtest_days', 30)
+
+    # Load user favorites
+    user_id = session.get('user_id')
+    user_favorites = []
+    if user_id:
+        row = query_db('SELECT favorites FROM users WHERE id = ?', [user_id], one=True)
+        if row and row[0]:
+            user_favorites = row[0].split(',') if row[0] else []
 
     return render_template_string('''
     <html>
@@ -426,9 +482,20 @@ def index():
         {% if backtest_result %}
         <div class="alert alert-secondary" style="white-space: pre-wrap;">{{ backtest_result }}</div>
         {% endif %}
+        <h2>User Profile</h2>
+        <form method="post" action="/favorites" class="mb-4">
+            <label for="favorites">Favorite Coins:</label>
+            <select name="favorites" multiple class="form-select" style="max-width: 400px;">
+                {% for coin in coins %}
+                <option value="{{ coin }}" {% if coin in user_favorites %}selected{% endif %}>{{ coin.upper() }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn btn-primary mt-2" type="submit">Save Favorites</button>
+        </form>
     </body>
     </html>
-    ''', coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days)
+    ''', coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days, user_favorites=user_favorites)
 
 if __name__ == '__main__':
+    init_db() # Initialize database on startup
     app.run(debug=True) 
