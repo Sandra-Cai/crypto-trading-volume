@@ -14,6 +14,82 @@ app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Change this in production
 DATABASE = 'users.db'
 
+# --- i18n dictionary ---
+LANGUAGES = {
+    'en': {
+        'login': 'Login',
+        'register': 'Register',
+        'logout': 'Logout',
+        'user_profile': 'User Profile',
+        'favorites': 'Favorite Coins',
+        'save_favorites': 'Save Favorites',
+        'trading_bot': 'Trading Bot (Demo Mode)',
+        'start_bot': 'Start Bot',
+        'stop_bot': 'Stop Bot',
+        'strategy': 'Strategy',
+        'coin': 'Coin',
+        'all': 'All',
+        'volume_spike': 'Volume Spike',
+        'rsi': 'RSI',
+        'price_alerts': 'Price Alerts',
+        'portfolio_value': 'Portfolio Value',
+        'trade_log': 'Trade Log',
+        'backtesting': 'Backtesting',
+        'days': 'Days',
+        'run_backtest': 'Run Backtest',
+        'user_profile': 'User Profile',
+        'already_account': 'Already have an account?',
+        'dont_account': "Don't have an account?",
+        'save': 'Save',
+        'update': 'Update',
+        'live_binance': 'Live (Binance)',
+        'select_language': 'Select Language',
+        'english': 'English',
+        'spanish': 'Spanish',
+    },
+    'es': {
+        'login': 'Iniciar sesión',
+        'register': 'Registrarse',
+        'logout': 'Cerrar sesión',
+        'user_profile': 'Perfil de usuario',
+        'favorites': 'Monedas favoritas',
+        'save_favorites': 'Guardar favoritos',
+        'trading_bot': 'Bot de Trading (Modo Demo)',
+        'start_bot': 'Iniciar Bot',
+        'stop_bot': 'Detener Bot',
+        'strategy': 'Estrategia',
+        'coin': 'Moneda',
+        'all': 'Todas',
+        'volume_spike': 'Volumen Pico',
+        'rsi': 'RSI',
+        'price_alerts': 'Alertas de Precio',
+        'portfolio_value': 'Valor de Portafolio',
+        'trade_log': 'Registro de Operaciones',
+        'backtesting': 'Backtesting',
+        'days': 'Días',
+        'run_backtest': 'Ejecutar Backtest',
+        'user_profile': 'Perfil de usuario',
+        'already_account': '¿Ya tienes una cuenta?',
+        'dont_account': '¿No tienes una cuenta?',
+        'save': 'Guardar',
+        'update': 'Actualizar',
+        'live_binance': 'En Vivo (Binance)',
+        'select_language': 'Seleccionar idioma',
+        'english': 'Inglés',
+        'spanish': 'Español',
+    }
+}
+
+def t(key):
+    lang = session.get('lang', 'en')
+    return LANGUAGES.get(lang, LANGUAGES['en']).get(key, key)
+
+@app.route('/setlang', methods=['POST'])
+def set_language():
+    lang = request.form.get('lang', 'en')
+    session['lang'] = lang
+    return redirect(request.referrer or url_for('index'))
+
 # --- User DB helpers ---
 def get_db():
     db = getattr(g, '_database', None)
@@ -284,6 +360,7 @@ def index():
         if row and row[0]:
             user_favorites = row[0].split(',') if row[0] else []
 
+    lang = session.get('lang', 'en')
     return render_template_string('''
     <html>
     <head>
@@ -293,11 +370,19 @@ def index():
         <title>Crypto Trading Volume Dashboard</title>
     </head>
     <body class="container py-3">
-        <div class="d-flex justify-content-end mb-2"><a href="{{ url_for('logout') }}" class="btn btn-outline-secondary">Logout</a></div>
-        <h1 class="mb-4">Crypto Trading Volume Dashboard</h1>
+        <form method="post" action="/setlang" class="mb-3">
+            <label for="lang">{{ t('select_language') }}:</label>
+            <select name="lang" class="form-select d-inline w-auto">
+                <option value="en" {% if lang == 'en' %}selected{% endif %}>{{ t('english') }}</option>
+                <option value="es" {% if lang == 'es' %}selected{% endif %}>{{ t('spanish') }}</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" type="submit">{{ t('update') }}</button>
+        </form>
+        <div class="d-flex justify-content-end mb-2"><a href="{{ url_for('logout') }}" class="btn btn-outline-secondary">{{ t('logout') }}</a></div>
+        <h1 class="mb-4">{{ t('crypto_trading_volume_dashboard') }}</h1>
         <form method="post" enctype="multipart/form-data" class="row g-3 mb-4">
             <div class="col-12 col-md-2">
-                <label for="coin" class="form-label">Coin:</label>
+                <label for="coin" class="form-label">{{ t('coin') }}:</label>
                 <select name="coin" class="form-select">
                     {% for coin in coins %}
                     <option value="{{ coin }}" {% if coin == selected_coin %}selected{% endif %}>{{ coin.upper() }}</option>
@@ -305,9 +390,9 @@ def index():
                 </select>
             </div>
             <div class="col-12 col-md-2">
-                <label for="exchange" class="form-label">Exchange:</label>
+                <label for="exchange" class="form-label">{{ t('exchange') }}:</label>
                 <select name="exchange" class="form-select">
-                    <option value="all" {% if selected_exchange == 'all' %}selected{% endif %}>All</option>
+                    <option value="all" {% if selected_exchange == 'all' %}selected{% endif %}>{{ t('all') }}</option>
                     <option value="binance" {% if selected_exchange == 'binance' %}selected{% endif %}>Binance</option>
                     <option value="coinbase" {% if selected_exchange == 'coinbase' %}selected{% endif %}>Coinbase</option>
                     <option value="kraken" {% if selected_exchange == 'kraken' %}selected{% endif %}>Kraken</option>
@@ -319,44 +404,44 @@ def index():
             <div class="col-12 col-md-2 d-flex align-items-end">
                 <div class="form-check">
                     <input class="form-check-input" type="checkbox" name="trend" {% if show_trend %}checked{% endif %}>
-                    <label class="form-check-label" for="trend">Show 7-day trend</label>
+                    <label class="form-check-label" for="trend">{{ t('show_7_day_trend') }}</label>
                 </div>
             </div>
             <div class="col-12 col-md-2 d-flex align-items-end">
                 <div class="form-check">
                     <input class="form-check-input" type="checkbox" name="detect_spikes" {% if detect_spikes %}checked{% endif %}>
-                    <label class="form-check-label" for="detect_spikes">Detect spikes</label>
+                    <label class="form-check-label" for="detect_spikes">{{ t('detect_spikes') }}</label>
                 </div>
             </div>
             <div class="col-12 col-md-2 d-flex align-items-end">
                 <div class="form-check">
                     <input class="form-check-input" type="checkbox" name="correlation" {% if show_correlation %}checked{% endif %}>
-                    <label class="form-check-label" for="correlation">Price-volume correlation</label>
+                    <label class="form-check-label" for="correlation">{{ t('price_volume_correlation') }}</label>
                 </div>
             </div>
             <div class="col-12 col-md-2">
-                <label for="alert_volume" class="form-label">Alert if volume exceeds:</label>
+                <label for="alert_volume" class="form-label">{{ t('alert_if_volume_exceeds') }}:</label>
                 <input class="form-control" type="number" step="any" name="alert_volume" value="{{ request.form.get('alert_volume', '') }}">
             </div>
             <div class="col-12 col-md-2">
-                <label for="alert_price" class="form-label">Alert if price exceeds:</label>
+                <label for="alert_price" class="form-label">{{ t('alert_if_price_exceeds') }}:</label>
                 <input class="form-control" type="number" step="any" name="alert_price" value="{{ request.form.get('alert_price', '') }}">
             </div>
             <div class="col-12 col-md-4">
-                <label for="portfolio" class="form-label">Upload Portfolio CSV (coin,amount):</label>
+                <label for="portfolio" class="form-label">{{ t('upload_portfolio_csv') }}:</label>
                 <input class="form-control" type="file" name="portfolio">
             </div>
             <div class="col-12 col-md-2 d-flex align-items-end">
                 <div class="form-check">
                     <input class="form-check-input" type="checkbox" name="live" {% if live %}checked{% endif %}>
-                    <label class="form-check-label" for="live">Live (Binance)</label>
+                    <label class="form-check-label" for="live">{{ t('live_binance') }}</label>
                 </div>
             </div>
             <div class="col-12 col-md-2 d-flex align-items-end">
-                <button class="btn btn-primary w-100" type="submit">Update</button>
+                <button class="btn btn-primary w-100" type="submit">{{ t('update') }}</button>
             </div>
         </form>
-        <h2 class="mb-3">{{ selected_coin.upper() }} (Price: {{ price if price else 'N/A' }} USD)</h2>
+        <h2 class="mb-3">{{ selected_coin.upper() }} ({{ t('price') }}: {{ price if price else 'N/A' }} USD)</h2>
         {% if alert_msgs %}
         <div class="alert alert-danger">
             {% for msg in alert_msgs %}
@@ -366,7 +451,7 @@ def index():
         {% endif %}
         {% if spike_alerts %}
         <div class="alert alert-warning">
-            <h5>Volume Spikes Detected:</h5>
+            <h5>{{ t('volume_spikes_detected') }}:</h5>
             {% for msg in spike_alerts %}
             <div>{{ msg }}</div>
             {% endfor %}
@@ -374,7 +459,7 @@ def index():
         {% endif %}
         {% if correlation_results %}
         <div class="alert alert-info">
-            <h5>Price-Volume Correlation:</h5>
+            <h5>{{ t('price_volume_correlation') }}:</h5>
             {% for ex, corr in correlation_results.items() %}
             <div>{{ ex }}: {{ "%.3f"|format(corr) }}</div>
             {% endfor %}
@@ -388,15 +473,15 @@ def index():
             const data = JSON.parse(event.data);
             const price = data.c;
             const volume = data.v;
-            document.getElementById('live-chart').innerHTML = `<div class='alert alert-info'>Live Price: <b>${price}</b> USDT | 24h Volume: <b>${volume}</b></div>`;
+            document.getElementById('live-chart').innerHTML = `<div class='alert alert-info'>{{ t('live_price') }}: <b>${price}</b> USDT | {{ t('24h_volume') }}: <b>${volume}</b></div>`;
         };
         </script>
         {% endif %}
         <div class="mb-4">{{ trend_div|safe }}</div>
         {% if portfolio_results %}
-        <h2>Portfolio Tracking</h2>
-        <p>Total Portfolio Value: <strong>{{ portfolio_results.total_value | round(2) }} USD</strong></p>
-        <p>Total Portfolio Volume (amount-weighted):</p>
+        <h2>{{ t('portfolio_tracking') }}</h2>
+        <p>{{ t('total_portfolio_value') }}: <strong>{{ portfolio_results.total_value | round(2) }} USD</strong></p>
+        <p>{{ t('total_portfolio_volume_amount_weighted') }}:</p>
         <ul>
             {% for ex, vol in portfolio_results.total_volumes.items() %}
             <li>{{ ex }}: {{ vol | round(2) }}</li>
@@ -404,7 +489,7 @@ def index():
         </ul>
         <div class="table-responsive">
         <table class="table table-bordered table-striped">
-            <thead><tr><th>Coin</th><th>Amount</th><th>Price (USD)</th><th>Value (USD)</th></tr></thead>
+            <thead><tr><th>{{ t('coin') }}</th><th>{{ t('amount') }}</th><th>{{ t('price_usd') }}</th><th>{{ t('value_usd') }}</th></tr></thead>
             <tbody>
             {% for d in portfolio_results.details %}
             <tr><td>{{ d.coin }}</td><td>{{ d.amount }}</td><td>{{ d.price if d.price else 'N/A' }}</td><td>{{ d.value | round(2) }}</td></tr>
@@ -413,10 +498,10 @@ def index():
         </table>
         </div>
         {% endif %}
-        <h2>Trading Bot (Demo Mode)</h2>
+        <h2>{{ t('trading_bot') }}</h2>
         <form method="post" action="/bot" class="row g-3 mb-4">
             <div class="col-12 col-md-3">
-                <label for="bot_coin" class="form-label">Coin:</label>
+                <label for="bot_coin" class="form-label">{{ t('coin') }}:</label>
                 <select name="bot_coin" class="form-select">
                     {% for coin in coins %}
                     <option value="{{ coin }}" {% if coin == bot_coin %}selected{% endif %}>{{ coin.upper() }}</option>
@@ -424,28 +509,29 @@ def index():
                 </select>
             </div>
             <div class="col-12 col-md-3">
-                <label for="bot_strategy" class="form-label">Strategy:</label>
+                <label for="bot_strategy" class="form-label">{{ t('strategy') }}:</label>
                 <select name="bot_strategy" class="form-select">
-                    <option value="all" {% if bot_strategy == 'all' %}selected{% endif %}>All</option>
-                    <option value="volume_spike" {% if bot_strategy == 'volume_spike' %}selected{% endif %}>Volume Spike</option>
-                    <option value="rsi" {% if bot_strategy == 'rsi' %}selected{% endif %}>RSI</option>
-                    <option value="price_alerts" {% if bot_strategy == 'price_alerts' %}selected{% endif %}>Price Alerts</option>
+                    <option value="all" {% if bot_strategy == 'all' %}selected{% endif %}>{{ t('all') }}</option>
+                    <option value="volume_spike" {% if bot_strategy == 'volume_spike' %}selected{% endif %}>{{ t('volume_spike') }}</option>
+                    <option value="rsi" {% if bot_strategy == 'rsi' %}selected{% endif %}>{{ t('rsi') }}</option>
+                    <option value="price_alerts" {% if bot_strategy == 'price_alerts' %}selected{% endif %}>{{ t('price_alerts') }}</option>
                 </select>
             </div>
             <div class="col-12 col-md-2 d-flex align-items-end">
                 {% if bot_running %}
-                <button class="btn btn-danger w-100" name="bot_action" value="stop" type="submit">Stop Bot</button>
+                <button class="btn btn-danger w-100" name="bot_action" value="stop" type="submit">{{ t('stop_bot') }}</button>
                 {% else %}
-                <button class="btn btn-success w-100" name="bot_action" value="start" type="submit">Start Bot</button>
+                <button class="btn btn-success w-100" name="bot_action" value="start" type="submit">{{ t('start_bot') }}</button>
                 {% endif %}
             </div>
         </form>
         {% if bot_running %}
-        <div class="alert alert-info">Bot running for <b>{{ bot_coin.upper() }}</b> (Strategy: <b>{{ bot_strategy }}</b>)<br>Portfolio Value: <b>${{ bot_portfolio|round(2) }}</b></div>
-        <h5>Trade Log</h5>
+        <div class="alert alert-info">
+            {{ t('bot_running_for') }} <b>{{ bot_coin.upper() }}</b> ({{ t('strategy') }}: <b>{{ bot_strategy }}</b>)<br>{{ t('portfolio_value') }}: <b>${{ bot_portfolio|round(2) }}</b></div>
+        <h5>{{ t('trade_log') }}</h5>
         <div class="table-responsive">
         <table class="table table-bordered table-striped">
-            <thead><tr><th>Time</th><th>Action</th><th>Coin</th><th>Amount</th><th>Price</th><th>Reason</th><th>Portfolio Value</th></tr></thead>
+            <thead><tr><th>{{ t('time') }}</th><th>{{ t('action') }}</th><th>{{ t('coin') }}</th><th>{{ t('amount') }}</th><th>{{ t('price') }}</th><th>{{ t('reason') }}</th><th>{{ t('portfolio_value') }}</th></tr></thead>
             <tbody>
             {% for trade in bot_trades %}
             <tr><td>{{ trade.timestamp }}</td><td>{{ trade.action }}</td><td>{{ trade.coin }}</td><td>{{ trade.amount }}</td><td>{{ trade.price }}</td><td>{{ trade.reason }}</td><td>{{ trade.portfolio_value|round(2) }}</td></tr>
@@ -454,10 +540,10 @@ def index():
         </table>
         </div>
         {% endif %}
-        <h2>Backtesting</h2>
+        <h2>{{ t('backtesting') }}</h2>
         <form method="post" action="/backtest" class="row g-3 mb-4">
             <div class="col-12 col-md-3">
-                <label for="backtest_coin" class="form-label">Coin:</label>
+                <label for="backtest_coin" class="form-label">{{ t('coin') }}:</label>
                 <select name="backtest_coin" class="form-select">
                     {% for coin in coins %}
                     <option value="{{ coin }}" {% if coin == backtest_coin %}selected{% endif %}>{{ coin.upper() }}</option>
@@ -465,36 +551,36 @@ def index():
                 </select>
             </div>
             <div class="col-12 col-md-3">
-                <label for="backtest_strategy" class="form-label">Strategy:</label>
+                <label for="backtest_strategy" class="form-label">{{ t('strategy') }}:</label>
                 <select name="backtest_strategy" class="form-select">
-                    <option value="volume_spike" {% if backtest_strategy == 'volume_spike' %}selected{% endif %}>Volume Spike</option>
-                    <option value="rsi" {% if backtest_strategy == 'rsi' %}selected{% endif %}>RSI</option>
+                    <option value="volume_spike" {% if backtest_strategy == 'volume_spike' %}selected{% endif %}>{{ t('volume_spike') }}</option>
+                    <option value="rsi" {% if backtest_strategy == 'rsi' %}selected{% endif %}>{{ t('rsi') }}</option>
                 </select>
             </div>
             <div class="col-12 col-md-2">
-                <label for="backtest_days" class="form-label">Days:</label>
+                <label for="backtest_days" class="form-label">{{ t('days') }}:</label>
                 <input class="form-control" type="number" name="backtest_days" value="{{ backtest_days }}" min="7" max="180">
             </div>
             <div class="col-12 col-md-2 d-flex align-items-end">
-                <button class="btn btn-primary w-100" type="submit">Run Backtest</button>
+                <button class="btn btn-primary w-100" type="submit">{{ t('run_backtest') }}</button>
             </div>
         </form>
         {% if backtest_result %}
         <div class="alert alert-secondary" style="white-space: pre-wrap;">{{ backtest_result }}</div>
         {% endif %}
-        <h2>User Profile</h2>
+        <h2>{{ t('user_profile') }}</h2>
         <form method="post" action="/favorites" class="mb-4">
-            <label for="favorites">Favorite Coins:</label>
+            <label for="favorites">{{ t('favorites') }}:</label>
             <select name="favorites" multiple class="form-select" style="max-width: 400px;">
                 {% for coin in coins %}
                 <option value="{{ coin }}" {% if coin in user_favorites %}selected{% endif %}>{{ coin.upper() }}</option>
                 {% endfor %}
             </select>
-            <button class="btn btn-primary mt-2" type="submit">Save Favorites</button>
+            <button class="btn btn-primary mt-2" type="submit">{{ t('save_favorites') }}</button>
         </form>
     </body>
     </html>
-    ''', coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days, user_favorites=user_favorites)
+    ''', t=t, lang=lang, coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days, user_favorites=user_favorites)
 
 if __name__ == '__main__':
     init_db() # Initialize database on startup
