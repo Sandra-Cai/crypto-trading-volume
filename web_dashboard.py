@@ -1,5 +1,5 @@
 from flask import Flask, render_template_string, request, redirect, url_for, session
-from fetch_volume import fetch_coingecko_trending, fetch_all_volumes, fetch_all_historical
+from fetch_volume import fetch_coingecko_trending, fetch_all_volumes, fetch_all_historical, detect_volume_spike, calculate_price_volume_correlation
 import plotly.graph_objs as go
 import plotly.offline as pyo
 import requests
@@ -19,6 +19,14 @@ def fetch_price(symbol):
         return None
     data = response.json()
     return data.get(symbol.lower(), {}).get('usd')
+
+def fetch_price_history(symbol, days=7):
+    url = f'https://api.coingecko.com/api/v3/coins/{symbol.lower()}/market_chart?vs_currency=usd&days={days}'
+    response = requests.get(url)
+    if response.status_code != 200:
+        return []
+    data = response.json()
+    return [price[1] for price in data['prices']]
 
 def parse_portfolio(file_storage):
     portfolio = []
@@ -74,16 +82,21 @@ def index():
     show_trend = request.form.get('trend', 'off') == 'on'
     alert_volume = request.form.get('alert_volume', type=float)
     alert_price = request.form.get('alert_price', type=float)
+    detect_spikes = request.form.get('detect_spikes', 'off') == 'on'
+    show_correlation = request.form.get('correlation', 'off') == 'on'
     coins = trending
     volumes = fetch_all_volumes(selected_coin.upper())
     price = fetch_price(selected_coin)
     hist = fetch_all_historical(selected_coin.upper()) if show_trend else None
-    exchanges = ['binance', 'coinbase', 'kraken'] if selected_exchange == 'all' else [selected_exchange]
+    exchanges = ['binance', 'coinbase', 'kraken', 'kucoin', 'okx', 'bybit'] if selected_exchange == 'all' else [selected_exchange]
     bar = go.Bar(x=exchanges, y=[volumes[ex] if volumes[ex] else 0 for ex in exchanges])
     layout = go.Layout(title=f'{selected_coin.upper()} 24h Trading Volume', xaxis=dict(title='Exchange'), yaxis=dict(title='Volume'))
     fig = go.Figure(data=[bar], layout=layout)
     plot_div = pyo.plot(fig, output_type='div', include_plotlyjs=False)
     trend_div = ''
+    spike_alerts = []
+    correlation_results = {}
+    
     if show_trend and hist:
         for ex in exchanges:
             vols = hist[ex]
@@ -95,6 +108,20 @@ def index():
                     trend_fig.add_trace(go.Scatter(x=list(range(len(ma))), y=ma, mode='lines', name=f'{ex} 3-day MA'))
                 trend_fig.update_layout(title=f'{selected_coin.upper()} 7-Day Volume Trend ({ex})', xaxis_title='Days Ago', yaxis_title='Volume')
                 trend_div += pyo.plot(trend_fig, output_type='div', include_plotlyjs=False)
+                
+                # Spike detection
+                if detect_spikes:
+                    is_spike, ratio = detect_volume_spike(vols)
+                    if is_spike:
+                        spike_alerts.append(f'{ex}: Volume spike detected! Current volume is {ratio:.2f}x average')
+                
+                # Correlation analysis
+                if show_correlation:
+                    price_history = fetch_price_history(selected_coin)
+                    if price_history and len(price_history) == len(vols):
+                        correlation = calculate_price_volume_correlation(price_history, vols)
+                        correlation_results[ex] = correlation
+    
     alert_msgs = []
     for ex in exchanges:
         vol = volumes[ex]
@@ -102,11 +129,12 @@ def index():
             alert_msgs.append(f'ALERT: {selected_coin.upper()} on {ex} volume {vol:,.2f} exceeds {alert_volume}')
         if alert_price and price and price > alert_price:
             alert_msgs.append(f'ALERT: {selected_coin.upper()} price {price:,.2f} exceeds {alert_price}')
+    
     portfolio_results = None
     if request.method == 'POST' and 'portfolio' in request.files and request.files['portfolio'].filename:
         portfolio = parse_portfolio(request.files['portfolio'])
         total_value = 0
-        total_volumes = {'binance': 0, 'coinbase': 0, 'kraken': 0}
+        total_volumes = {'binance': 0, 'coinbase': 0, 'kraken': 0, 'kucoin': 0, 'okx': 0, 'bybit': 0}
         details = []
         for entry in portfolio:
             coin = entry['coin']
@@ -122,6 +150,7 @@ def index():
                     total_volumes[ex] += v * amount
             total_value += value
         portfolio_results = {'total_value': total_value, 'total_volumes': total_volumes, 'details': details}
+    
     return render_template_string('''
     <html>
     <head>
@@ -134,7 +163,7 @@ def index():
         <div class="d-flex justify-content-end mb-2"><a href="{{ url_for('logout') }}" class="btn btn-outline-secondary">Logout</a></div>
         <h1 class="mb-4">Crypto Trading Volume Dashboard</h1>
         <form method="post" enctype="multipart/form-data" class="row g-3 mb-4">
-            <div class="col-12 col-md-3">
+            <div class="col-12 col-md-2">
                 <label for="coin" class="form-label">Coin:</label>
                 <select name="coin" class="form-select">
                     {% for coin in coins %}
@@ -142,19 +171,34 @@ def index():
                     {% endfor %}
                 </select>
             </div>
-            <div class="col-12 col-md-3">
+            <div class="col-12 col-md-2">
                 <label for="exchange" class="form-label">Exchange:</label>
                 <select name="exchange" class="form-select">
                     <option value="all" {% if selected_exchange == 'all' %}selected{% endif %}>All</option>
                     <option value="binance" {% if selected_exchange == 'binance' %}selected{% endif %}>Binance</option>
                     <option value="coinbase" {% if selected_exchange == 'coinbase' %}selected{% endif %}>Coinbase</option>
                     <option value="kraken" {% if selected_exchange == 'kraken' %}selected{% endif %}>Kraken</option>
+                    <option value="kucoin" {% if selected_exchange == 'kucoin' %}selected{% endif %}>KuCoin</option>
+                    <option value="okx" {% if selected_exchange == 'okx' %}selected{% endif %}>OKX</option>
+                    <option value="bybit" {% if selected_exchange == 'bybit' %}selected{% endif %}>Bybit</option>
                 </select>
             </div>
             <div class="col-12 col-md-2 d-flex align-items-end">
                 <div class="form-check">
                     <input class="form-check-input" type="checkbox" name="trend" {% if show_trend %}checked{% endif %}>
                     <label class="form-check-label" for="trend">Show 7-day trend</label>
+                </div>
+            </div>
+            <div class="col-12 col-md-2 d-flex align-items-end">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="detect_spikes" {% if detect_spikes %}checked{% endif %}>
+                    <label class="form-check-label" for="detect_spikes">Detect spikes</label>
+                </div>
+            </div>
+            <div class="col-12 col-md-2 d-flex align-items-end">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="correlation" {% if show_correlation %}checked{% endif %}>
+                    <label class="form-check-label" for="correlation">Price-volume correlation</label>
                 </div>
             </div>
             <div class="col-12 col-md-2">
@@ -178,6 +222,22 @@ def index():
         <div class="alert alert-danger">
             {% for msg in alert_msgs %}
             <div>{{ msg }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if spike_alerts %}
+        <div class="alert alert-warning">
+            <h5>Volume Spikes Detected:</h5>
+            {% for msg in spike_alerts %}
+            <div>{{ msg }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if correlation_results %}
+        <div class="alert alert-info">
+            <h5>Price-Volume Correlation:</h5>
+            {% for ex, corr in correlation_results.items() %}
+            <div>{{ ex }}: {{ "%.3f"|format(corr) }}</div>
             {% endfor %}
         </div>
         {% endif %}
@@ -205,7 +265,7 @@ def index():
         {% endif %}
     </body>
     </html>
-    ''', coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results)
+    ''', coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation)
 
 if __name__ == '__main__':
     app.run(debug=True) 

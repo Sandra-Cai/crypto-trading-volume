@@ -4,14 +4,17 @@ This project provides real-time monitoring and analysis of trending cryptocurren
 
 ## Features
 - Real-time tracking of trading volumes for top cryptocurrencies
-- Aggregation of data from multiple exchange platforms (Binance, Coinbase, Kraken)
-- Trend analysis and visualization tools with moving averages
+- Aggregation of data from6 major exchanges (Binance, Coinbase, Kraken, KuCoin, OKX, Bybit)
+- Advanced trend analysis with moving averages and volume spike detection
+- Price-volume correlation analysis for market insights
 - Alerts for significant volume changes or unusual activity
 - Customizable watchlists for specific coins or exchanges
 - Portfolio tracking with value and volume-weighted analysis
 - CSV export functionality
 - Mobile-friendly web dashboard with user authentication
 - API rate limiting and caching for improved performance
+- Volume spike detection (20x average threshold)
+- Statistical correlation analysis between price and volume movements
 
 ## Quick Start with Docker
 
@@ -60,12 +63,22 @@ docker run -p 50000pto-trading-volume
    python web_dashboard.py
    
    # Or use the CLI
-   python cli.py --top 5   ```
+   python cli.py --top5# Pip Installation
+```bash
+# Install from PyPI (when published)
+pip install crypto-trading-volume
+
+# Use the CLI
+crypto-volume --top 5
+
+# Start the dashboard
+crypto-dashboard
+```
 
 ## Usage
 
 ### Web Dashboard
-1. Start the application and navigate to `http://localhost:50ogin with username: `user`, password: `pass`3t a coin, exchange, and enable features like trends or alerts
+1. Start the application and navigate to `http://localhost:50ogin with username: `user`, password: `pass`3t a coin, exchange, and enable features like trends, spike detection, or correlation analysis
 4. Upload a portfolio CSV file (columns: `coin,amount`) for portfolio tracking
 
 ### Command Line Interface
@@ -91,7 +104,7 @@ python cli.py --trend
 #### Advanced Features
 ```bash
 # Set volume alerts
-python cli.py --alert-volume 10000# Set price alerts
+python cli.py --alert-volume 100# Set price alerts
 python cli.py --alert-price 50000
 
 # Export results to CSV
@@ -99,6 +112,15 @@ python cli.py --export-csv results.csv
 
 # Portfolio tracking
 python cli.py --portfolio my_portfolio.csv
+
+# Detect volume spikes (20average)
+python cli.py --detect-spikes
+
+# Calculate price-volume correlation
+python cli.py --correlation
+
+# Combine multiple features
+python cli.py --coin bitcoin --trend --detect-spikes --correlation --export-csv analysis.csv
 ```
 
 #### Portfolio CSV Format
@@ -106,8 +128,25 @@ Create a CSV file with columns `coin` and `amount`:
 ```csv
 coin,amount
 bitcoin,0.5thereum,2.0
-solana,10.0
-```
+solana,10.0Advanced Analytics
+
+### Volume Spike Detection
+The system automatically detects when trading volume is significantly higher than the 7-day average:
+- Threshold: 20x the average volume
+- Helps identify unusual market activity
+- Available in both CLI and dashboard
+
+### Price-Volume Correlation
+Calculate the statistical correlation between price and volume changes:
+- Range: -1 to +1 (negative = inverse correlation, positive = direct correlation)
+- Helps understand market dynamics
+- Available for all supported exchanges
+
+### Multi-Exchange Analysis
+Compare trading volumes across6 major exchanges:
+- Binance, Coinbase, Kraken, KuCoin, OKX, Bybit
+- Aggregated data for comprehensive market view
+- Exchange-specific trend analysis
 
 ## Deployment
 
@@ -154,6 +193,9 @@ The application includes caching to handle API rate limits:
 - Binance: 1200 requests/minute
 - Coinbase: 3 requests/second
 - Kraken: 15 requests/10 seconds
+- KuCoin: 1800 requests/minute
+- OKX: 20 requests/2 seconds
+- Bybit: 120 requests/minute
 
 ## Troubleshooting
 
