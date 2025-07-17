@@ -7,6 +7,7 @@ import requests
 import csv
 import io
 import threading
+from backtest import backtest_volume_spike, backtest_rsi
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Change this in production
@@ -110,6 +111,30 @@ def bot_control():
         session['bot_running'] = False
     return redirect(url_for('index'))
 
+@app.route('/backtest', methods=['POST'])
+def backtest_control():
+    coin = request.form.get('backtest_coin')
+    strategy = request.form.get('backtest_strategy')
+    days = int(request.form.get('backtest_days', 30))
+    result = ''
+    if coin and strategy:
+        import io
+        import sys
+        buf = io.StringIO()
+        sys_stdout = sys.stdout
+        sys.stdout = buf
+        if strategy == 'volume_spike':
+            backtest_volume_spike(coin, days=days)
+        elif strategy == 'rsi':
+            backtest_rsi(coin, days=days)
+        sys.stdout = sys_stdout
+        result = buf.getvalue()
+    session['backtest_result'] = result
+    session['backtest_coin'] = coin
+    session['backtest_strategy'] = strategy
+    session['backtest_days'] = days
+    return redirect(url_for('index'))
+
 @app.route('/', methods=['GET', 'POST'])
 @login_required
 def index():
@@ -198,6 +223,11 @@ def index():
     bot_portfolio = bot.get_portfolio_value() if bot and bot_running else None
     bot_trades = bot.trade_history if bot and bot_running else []
     
+    backtest_result = session.pop('backtest_result', None)
+    backtest_coin = session.pop('backtest_coin', '')
+    backtest_strategy = session.pop('backtest_strategy', 'volume_spike')
+    backtest_days = session.pop('backtest_days', 30)
+
     return render_template_string('''
     <html>
     <head>
@@ -368,9 +398,37 @@ def index():
         </table>
         </div>
         {% endif %}
+        <h2>Backtesting</h2>
+        <form method="post" action="/backtest" class="row g-3 mb-4">
+            <div class="col-12 col-md-3">
+                <label for="backtest_coin" class="form-label">Coin:</label>
+                <select name="backtest_coin" class="form-select">
+                    {% for coin in coins %}
+                    <option value="{{ coin }}" {% if coin == backtest_coin %}selected{% endif %}>{{ coin.upper() }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-3">
+                <label for="backtest_strategy" class="form-label">Strategy:</label>
+                <select name="backtest_strategy" class="form-select">
+                    <option value="volume_spike" {% if backtest_strategy == 'volume_spike' %}selected{% endif %}>Volume Spike</option>
+                    <option value="rsi" {% if backtest_strategy == 'rsi' %}selected{% endif %}>RSI</option>
+                </select>
+            </div>
+            <div class="col-12 col-md-2">
+                <label for="backtest_days" class="form-label">Days:</label>
+                <input class="form-control" type="number" name="backtest_days" value="{{ backtest_days }}" min="7" max="180">
+            </div>
+            <div class="col-12 col-md-2 d-flex align-items-end">
+                <button class="btn btn-primary w-100" type="submit">Run Backtest</button>
+            </div>
+        </form>
+        {% if backtest_result %}
+        <div class="alert alert-secondary" style="white-space: pre-wrap;">{{ backtest_result }}</div>
+        {% endif %}
     </body>
     </html>
-    ''', coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades)
+    ''', coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days)
 
 if __name__ == '__main__':
     app.run(debug=True) 
