@@ -1,5 +1,10 @@
 import argparse
-from fetch_volume import fetch_coingecko_trending, fetch_all_volumes, fetch_all_historical, detect_volume_spike, calculate_price_volume_correlation
+from fetch_volume import (
+    fetch_coingecko_trending, fetch_all_volumes, fetch_all_historical, 
+    detect_volume_spike, calculate_price_volume_correlation, fetch_market_data,
+    fetch_social_sentiment, calculate_rsi, calculate_macd, detect_arbitrage_opportunities,
+    fetch_market_dominance
+)
 import requests
 import csv
 
@@ -39,7 +44,21 @@ def main():
     parser.add_argument('--portfolio', type=str, help='Path to portfolio CSV file (columns: coin,amount)')
     parser.add_argument('--detect-spikes', action='store_true', help='Detect volume spikes (20rage)')
     parser.add_argument('--correlation', action='store_true', help='Calculate price-volume correlation')
+    parser.add_argument('--market-data', action='store_true', help='Show market data (cap, rank, etc.)')
+    parser.add_argument('--sentiment', action='store_true', help='Show social sentiment analysis')
+    parser.add_argument('--technical', action='store_true', help='Show technical indicators (RSI, MACD)')
+    parser.add_argument('--arbitrage', action='store_true', help='Detect arbitrage opportunities')
+    parser.add_argument('--dominance', action='store_true', help='Show market dominance data')
     args = parser.parse_args()
+
+    if args.dominance:
+        print('Market Dominance Analysis:')
+        dominance = fetch_market_dominance()
+        if dominance:
+            print('Top 10 cryptocurrencies by market dominance:')
+            for i, (coin, percentage) in enumerate(list(dominance.items())[:10]):
+                print(f'  {i+1}. {coin}: {percentage:.2f}%')
+        return
 
     if args.portfolio:
         portfolio = load_portfolio(args.portfolio)
@@ -104,6 +123,38 @@ def main():
             if args.alert_price and price and price > args.alert_price:
                 print(f'  ALERT: {symbol} price {price:,.2f} exceeds {args.alert_price}')
         
+        # Market data
+        if args.market_data:
+            market_data = fetch_market_data(coin)
+            if market_data:
+                print(f'  Market Cap: ${market_data["market_cap"]:,.2f}')
+                print(f'  24h Change: {market_data["price_change_24h"]:.2f}%')
+                print(f'  Market Rank: #{market_data["market_cap_rank"]}')
+                print(f'  Circulating Supply: {market_data["circulating_supply"]:,.0f}')
+                print(f'  ATH: ${market_data["ath"]:,.2f} ({market_data["ath_change_percentage"]:.2f}% ATH)')
+        
+        # Sentiment analysis
+        if args.sentiment:
+            sentiment = fetch_social_sentiment(coin)
+            print(f'  Sentiment Score: {sentiment:0.3f}')
+            if sentiment > 0.5:
+                print('  Sentiment: Very Positive')
+            elif sentiment > 0:
+                print('  Sentiment: Positive')
+            elif sentiment > -0.5:
+                print('  Sentiment: Negative')
+            else:
+                print('  Sentiment: Very Negative')
+        
+        # Arbitrage detection
+        if args.arbitrage:
+            arbitrage = detect_arbitrage_opportunities(symbol)
+            if arbitrage:
+                for opp in arbitrage:
+                    print(f'  ARBITRAGE: Buy on {opp["buy_exchange"]} at ${opp["buy_price"]:.2f}, sell on {opp["sell_exchange"]} at ${opp["sell_price"]:.2f} ({opp["spread_percentage"]:.2f}% spread)')
+            else:
+                print('  No significant arbitrage opportunities detected')
+        
         if args.trend:
             hist = fetch_all_historical(symbol)
             print('  7-day volume trend:')
@@ -114,6 +165,16 @@ def main():
                         is_spike, ratio = detect_volume_spike(vols)
                         if is_spike:
                             print(f'      SPIKE DETECTED! Current volume is {ratio:.2f}x average')
+                    
+                    # Technical indicators
+                    if args.technical and vols:
+                        rsi = calculate_rsi(vols)
+                        if rsi:
+                            print(f'      RSI: {rsi:.2f}')
+                        
+                        macd, signal, hist_macd = calculate_macd(vols)
+                        if macd:
+                            print(f'      MACD: {macd:.2f}, Signal: {signal:.2f}, Histogram: {hist_macd:.2f}')
             else:
                 vols = hist.get(args.exchange)
                 print(f'    {args.exchange}: {vols}')
@@ -121,6 +182,16 @@ def main():
                     is_spike, ratio = detect_volume_spike(vols)
                     if is_spike:
                         print(f'      SPIKE DETECTED! Current volume is {ratio:.2f}x average')
+                
+                # Technical indicators
+                if args.technical and vols:
+                    rsi = calculate_rsi(vols)
+                    if rsi:
+                        print(f'      RSI: {rsi:.2f}')
+                    
+                    macd, signal, hist_macd = calculate_macd(vols)
+                    if macd:
+                        print(f     MACD: [object Object]macd:.2f}, Signal: {signal:0.2, Histogram: {hist_macd:.2f}')
         
         if args.correlation:
             price_history = fetch_price_history(coin)
