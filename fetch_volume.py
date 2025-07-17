@@ -373,83 +373,78 @@ async def fetch_kucoin_historical_async(symbol, days, session):
 def fetch_kucoin_historical(symbol, days=7):
     async def wrapper():
         async with AiohttpSession() as session:
+            return await fetch_kucoin_historical_async(symbol, days, session)
+    return asyncio.run(wrapper())
+
 # --- OKX ---
-def fetch_okx_volume(symbol):
-    key = f'okx_volume_{symbol}'
-    cached = cache_get(key)
-    if cached is not None:
-        return cached
+async def fetch_okx_volume_async(symbol, session):
     url = f'https://www.okx.com/api/v5/market/ticker?instId={symbol.upper()}-USDT'
-    response = requests.get(url)
-    if response.status_code != 200:
-        cache_set(key, None)
-        return None
-    data = response.json()
+    async with session.get(url) as response:
+        if response.status != 200:
+            return None
+        data = await response.json()
     try:
-        volume = float(data['data']['volCcy24h'])
-        cache_set(key, volume)
-        return volume
+        return float(data['data'][0]['volCcy24h'])
     except Exception:
-        cache_set(key, None)
         return None
+
+def fetch_okx_volume(symbol):
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_okx_volume_async(symbol, session)
+    return asyncio.run(wrapper())
+
+async def fetch_okx_historical_async(symbol, days, session):
+    url = f'https://www.okx.com/api/v5/market/history-candles?instId={symbol.upper()}-USDT&bar=1D&limit={days}'
+    async with session.get(url) as response:
+        if response.status != 200:
+            return []
+        data = await response.json()
+    try:
+        return [float(day[5]) for day in data['data']]
+    except Exception:
+        return []
 
 def fetch_okx_historical(symbol, days=7):
-    key = f'okx_hist_{symbol}_{days}'
-    cached = cache_get(key)
-    if cached is not None:
-        return cached
-    url = f'https://www.okx.com/api/v5/market/candles?instId={symbol.upper()}-USDT&bar=1D&limit={days}'
-    response = requests.get(url)
-    if response.status_code != 200:
-        cache_set(key, [])
-        return []
-    data = response.json()
-    try:
-        result = [float(day[6]) for day in data['data']]
-        cache_set(key, result)
-        return result
-    except Exception:
-        cache_set(key, [])
-        return []
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_okx_historical_async(symbol, days, session)
+    return asyncio.run(wrapper())
 
 # --- Bybit ---
-def fetch_bybit_volume(symbol):
-    key = f'bybit_volume_{symbol}'
-    cached = cache_get(key)
-    if cached is not None:
-        return cached
+async def fetch_bybit_volume_async(symbol, session):
     url = f'https://api.bybit.com/v5/market/tickers?category=spot&symbol={symbol.upper()}USDT'
-    response = requests.get(url)
-    if response.status_code != 200:
-        cache_set(key, None)
-        return None
-    data = response.json()
+    async with session.get(url) as response:
+        if response.status != 200:
+            return None
+        data = await response.json()
     try:
-        volume = float(data['result']['list'][0]['volume24h'])
-        cache_set(key, volume)
-        return volume
+        return float(data['result']['list'][0]['quoteVolume24h'])
     except Exception:
-        cache_set(key, None)
         return None
 
-def fetch_bybit_historical(symbol, days=7):
-    key = f'bybit_hist_{symbol}_{days}'
-    cached = cache_get(key)
-    if cached is not None:
-        return cached
-    url = f'https://api.bybit.com/v5/market/kline?category=spot&symbol={symbol.upper()}USDT&interval=D&limit={days}'
-    response = requests.get(url)
-    if response.status_code != 200:
-        cache_set(key, [])
-        return []
-    data = response.json()
+def fetch_bybit_volume(symbol):
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_bybit_volume_async(symbol, session)
+    return asyncio.run(wrapper())
+
+async def fetch_bybit_historical_async(symbol, days, session):
+    url = f'https://api.bybit.com/v5/market/history-candles?category=spot&symbol={symbol.upper()}USDT&interval=1D&limit={days}'
+    async with session.get(url) as response:
+        if response.status != 200:
+            return []
+        data = await response.json()
     try:
-        result = [float(day[5]) for day in data['result']['list']]
-        cache_set(key, result)
-        return result
+        return [float(day[5]) for day in data['result']['list']]
     except Exception:
-        cache_set(key, [])
         return []
+
+def fetch_bybit_historical(symbol, days=7):
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_bybit_historical_async(symbol, days, session)
+    return asyncio.run(wrapper())
 
 # --- Enhanced Aggregated fetch ---
 def fetch_all_volumes(symbol):
