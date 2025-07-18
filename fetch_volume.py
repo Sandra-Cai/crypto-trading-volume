@@ -5,6 +5,11 @@ import statistics
 import json
 import asyncio
 import aiohttp
+import logging
+
+# Set up a default logger
+logger = logging.getLogger("fetch_volume")
+logging.basicConfig(level=logging.INFO)
 
 # --- Simple in-memory cache ---
 _cache = {}
@@ -36,22 +41,28 @@ async def fetch_market_data_async(symbol, session):
     if cached:
         return cached
     url = f'https://api.coingecko.com/api/v3/coins/{symbol.lower()}'
-    async with session.get(url) as response:
-        if response.status != 200:
-            cache_set(key, None)
-            return None
-        data = await response.json()
-    market_data = {
-        'market_cap': data['market_data']['market_cap']['usd'],
-        'price_change_24h': data['market_data']['price_change_percentage_24h'],
-        'market_cap_rank': data['market_cap_rank'],
-        'circulating_supply': data['market_data']['circulating_supply'],
-        'total_supply': data['market_data']['total_supply'],
-        'ath': data['market_data']['ath']['usd'],
-        'ath_change_percentage': data['market_data']['ath_change_percentage']['usd']
-    }
-    cache_set(key, market_data)
-    return market_data
+    try:
+        async with session.get(url) as response:
+            if response.status != 200:
+                logger.error(f"[CoinGecko] Failed to fetch market data for {symbol}: HTTP {response.status}")
+                cache_set(key, None)
+                return None
+            data = await response.json()
+        market_data = {
+            'market_cap': data['market_data']['market_cap']['usd'],
+            'price_change_24h': data['market_data']['price_change_percentage_24h'],
+            'market_cap_rank': data['market_cap_rank'],
+            'circulating_supply': data['market_data']['circulating_supply'],
+            'total_supply': data['market_data']['total_supply'],
+            'ath': data['market_data']['ath']['usd'],
+            'ath_change_percentage': data['market_data']['ath_change_percentage']['usd']
+        }
+        cache_set(key, market_data)
+        return market_data
+    except Exception as e:
+        logger.error(f"[CoinGecko] Exception fetching market data for {symbol}: {e}")
+        cache_set(key, None)
+        return None
 
 def fetch_market_data(symbol):
     """Synchronous wrapper for async fetch_market_data_async"""
@@ -67,14 +78,20 @@ async def fetch_market_dominance_async(session):
     if cached:
         return cached
     url = 'https://api.coingecko.com/api/v3/global'
-    async with session.get(url) as response:
-        if response.status != 200:
-            cache_set(key, None)
-            return None
-        data = await response.json()
-    dominance = data['data']['market_cap_percentage']
-    cache_set(key, dominance)
-    return dominance
+    try:
+        async with session.get(url) as response:
+            if response.status != 200:
+                logger.error(f"[CoinGecko] Failed to fetch market dominance: HTTP {response.status}")
+                cache_set(key, None)
+                return None
+            data = await response.json()
+        dominance = data['data']['market_cap_percentage']
+        cache_set(key, dominance)
+        return dominance
+    except Exception as e:
+        logger.error(f"[CoinGecko] Exception fetching market dominance: {e}")
+        cache_set(key, None)
+        return None
 
 def fetch_market_dominance():
     async def wrapper():
@@ -89,12 +106,17 @@ async def fetch_coingecko_trending_async(session):
     if cached:
         return cached
     url = 'https://api.coingecko.com/api/v3/search/trending'
-    async with session.get(url) as response:
-        response.raise_for_status()
-        data = await response.json()
-    trending = [item['item']['id'] for item in data['coins']]
-    cache_set(key, trending)
-    return trending
+    try:
+        async with session.get(url) as response:
+            response.raise_for_status()
+            data = await response.json()
+        trending = [item['item']['id'] for item in data['coins']]
+        cache_set(key, trending)
+        return trending
+    except Exception as e:
+        logger.error(f"[CoinGecko] Exception fetching trending coins: {e}")
+        cache_set(key, None)
+        return None
 
 def fetch_coingecko_trending():
     async def wrapper():
@@ -207,21 +229,22 @@ def detect_arbitrage_opportunities(symbol):
 
 # --- Async Price from Exchange ---
 async def fetch_price_from_exchange_async(symbol, exchange, session):
-    if exchange == 'binance':
-        url = f'https://api.binance.com/api/v3/ticker/price?symbol={symbol.upper()}USDT'
-    elif exchange == 'coinbase':
-        url = f'https://api.pro.coinbase.com/products/{symbol.upper()}-USD/ticker'
-    elif exchange == 'kraken':
-        kraken_map = {'BTC': 'XBT', 'ETH': 'ETH', 'SOL': 'SOL', 'DOGE': 'DOGE', 'ADA': 'ADA', 'XRP': 'XRP'}
-        kraken_symbol = kraken_map.get(symbol.upper(), symbol.upper()) + 'USD'
-        url = f'https://api.kraken.com/0/public/Ticker?pair={kraken_symbol}'
-    else:
-        return None
-    async with session.get(url) as response:
-        if response.status != 200:
-            return None
-        data = await response.json()
     try:
+        if exchange == 'binance':
+            url = f'https://api.binance.com/api/v3/ticker/price?symbol={symbol.upper()}USDT'
+        elif exchange == 'coinbase':
+            url = f'https://api.pro.coinbase.com/products/{symbol.upper()}-USD/ticker'
+        elif exchange == 'kraken':
+            kraken_map = {'BTC': 'XBT', 'ETH': 'ETH', 'SOL': 'SOL', 'DOGE': 'DOGE', 'ADA': 'ADA', 'XRP': 'XRP'}
+            kraken_symbol = kraken_map.get(symbol.upper(), symbol.upper()) + 'USD'
+            url = f'https://api.kraken.com/0/public/Ticker?pair={kraken_symbol}'
+        else:
+            return None
+        async with session.get(url) as response:
+            if response.status != 200:
+                logger.error(f"[{exchange}] Failed to fetch price for {symbol}: HTTP {response.status}")
+                return None
+            data = await response.json()
         if exchange == 'binance':
             return float(data['price'])
         elif exchange == 'coinbase':
@@ -229,7 +252,8 @@ async def fetch_price_from_exchange_async(symbol, exchange, session):
         elif exchange == 'kraken':
             pair = list(data['result'].keys())[0]
             return float(data['result'][pair]['c'][0])
-    except Exception:
+    except Exception as e:
+        logger.error(f"[{exchange}] Exception fetching price for {symbol}: {e}")
         return None
 
 def fetch_price_from_exchange(symbol, exchange):
@@ -240,12 +264,17 @@ def fetch_price_from_exchange(symbol, exchange):
 
 # --- Async Volume/Historical for Each Exchange ---
 async def fetch_binance_volume_async(symbol, session):
-    url = f'https://api.binance.com/api/v3/ticker/24hr?symbol={symbol.upper()}USDT'
-    async with session.get(url) as response:
-        if response.status != 200:
-            return None
-        data = await response.json()
-    return float(data['quoteVolume'])
+    try:
+        url = f'https://api.binance.com/api/v3/ticker/24hr?symbol={symbol.upper()}USDT'
+        async with session.get(url) as response:
+            if response.status != 200:
+                logger.error(f"[Binance] Failed to fetch volume for {symbol}: HTTP {response.status}")
+                return None
+            data = await response.json()
+        return float(data['quoteVolume'])
+    except Exception as e:
+        logger.error(f"[Binance] Exception fetching volume for {symbol}: {e}")
+        return None
 
 def fetch_binance_volume(symbol):
     async def wrapper():
@@ -254,13 +283,17 @@ def fetch_binance_volume(symbol):
     return asyncio.run(wrapper())
 
 async def fetch_binance_historical_async(symbol, days, session):
-    url = f'https://api.binance.com/api/v3/klines?symbol={symbol.upper()}USDT&interval=1d&limit={days}'
-    async with session.get(url) as response:
-        if response.status != 200:
-            return []
-        data = await response.json()
-    result = [float(day[7]) for day in data]
-    return result
+    try:
+        url = f'https://api.binance.com/api/v3/klines?symbol={symbol.upper()}USDT&interval=1d&limit={days}'
+        async with session.get(url) as response:
+            if response.status != 200:
+                logger.error(f"[Binance] Failed to fetch historical for {symbol}: HTTP {response.status}")
+                return []
+            data = await response.json()
+        return [float(day[7]) for day in data]
+    except Exception as e:
+        logger.error(f"[Binance] Exception fetching historical for {symbol}: {e}")
+        return []
 
 def fetch_binance_historical(symbol, days=7):
     async def wrapper():
@@ -269,12 +302,17 @@ def fetch_binance_historical(symbol, days=7):
     return asyncio.run(wrapper())
 
 async def fetch_coinbase_volume_async(symbol, session):
-    url = f'https://api.pro.coinbase.com/products/{symbol.upper()}-USD/stats'
-    async with session.get(url) as response:
-        if response.status != 200:
-            return None
-        data = await response.json()
-    return float(data.get('volume', 0))
+    try:
+        url = f'https://api.pro.coinbase.com/products/{symbol.upper()}-USD/stats'
+        async with session.get(url) as response:
+            if response.status != 200:
+                logger.error(f"[Coinbase] Failed to fetch volume for {symbol}: HTTP {response.status}")
+                return None
+            data = await response.json()
+        return float(data.get('volume', 0))
+    except Exception as e:
+        logger.error(f"[Coinbase] Exception fetching volume for {symbol}: {e}")
+        return None
 
 def fetch_coinbase_volume(symbol):
     async def wrapper():
@@ -283,13 +321,17 @@ def fetch_coinbase_volume(symbol):
     return asyncio.run(wrapper())
 
 async def fetch_coinbase_historical_async(symbol, days, session):
-    url = f'https://api.pro.coinbase.com/products/{symbol.upper()}-USD/candles?granularity=86400&limit={days}'
-    async with session.get(url) as response:
-        if response.status != 200:
-            return []
-        data = await response.json()
-    result = [float(day[5]) for day in data]
-    return result
+    try:
+        url = f'https://api.pro.coinbase.com/products/{symbol.upper()}-USD/candles?granularity=86400&limit={days}'
+        async with session.get(url) as response:
+            if response.status != 200:
+                logger.error(f"[Coinbase] Failed to fetch historical for {symbol}: HTTP {response.status}")
+                return []
+            data = await response.json()
+        return [float(day[5]) for day in data]
+    except Exception as e:
+        logger.error(f"[Coinbase] Exception fetching historical for {symbol}: {e}")
+        return []
 
 def fetch_coinbase_historical(symbol, days=7):
     async def wrapper():
@@ -298,18 +340,19 @@ def fetch_coinbase_historical(symbol, days=7):
     return asyncio.run(wrapper())
 
 async def fetch_kraken_volume_async(symbol, session):
-    kraken_map = {'BTC': 'XBT', 'ETH': 'ETH', 'SOL': 'SOL', 'DOGE': 'DOGE', 'ADA': 'ADA', 'XRP': 'XRP'}
-    kraken_symbol = kraken_map.get(symbol.upper(), symbol.upper()) + 'USD'
-    url = f'https://api.kraken.com/0/public/Ticker?pair={kraken_symbol}'
-    async with session.get(url) as response:
-        if response.status != 200:
-            return None
-        data = await response.json()
     try:
+        kraken_map = {'BTC': 'XBT', 'ETH': 'ETH', 'SOL': 'SOL', 'DOGE': 'DOGE', 'ADA': 'ADA', 'XRP': 'XRP'}
+        kraken_symbol = kraken_map.get(symbol.upper(), symbol.upper()) + 'USD'
+        url = f'https://api.kraken.com/0/public/Ticker?pair={kraken_symbol}'
+        async with session.get(url) as response:
+            if response.status != 200:
+                logger.error(f"[Kraken] Failed to fetch volume for {symbol}: HTTP {response.status}")
+                return None
+            data = await response.json()
         pair = list(data['result'].keys())[0]
-        volume = float(data['result'][pair]['v'][1])
-        return volume
-    except Exception:
+        return float(data['result'][pair]['v'][1])
+    except Exception as e:
+        logger.error(f"[Kraken] Exception fetching volume for {symbol}: {e}")
         return None
 
 def fetch_kraken_volume(symbol):
@@ -319,19 +362,20 @@ def fetch_kraken_volume(symbol):
     return asyncio.run(wrapper())
 
 async def fetch_kraken_historical_async(symbol, days, session):
-    kraken_map = {'BTC': 'XBT', 'ETH': 'ETH', 'SOL': 'SOL', 'DOGE': 'DOGE', 'ADA': 'ADA', 'XRP': 'XRP'}
-    kraken_symbol = kraken_map.get(symbol.upper(), symbol.upper()) + 'USD'
-    url = f'https://api.kraken.com/0/public/OHLC?pair={kraken_symbol}&interval=1440'
-    async with session.get(url) as response:
-        if response.status != 200:
-            return []
-        data = await response.json()
     try:
+        kraken_map = {'BTC': 'XBT', 'ETH': 'ETH', 'SOL': 'SOL', 'DOGE': 'DOGE', 'ADA': 'ADA', 'XRP': 'XRP'}
+        kraken_symbol = kraken_map.get(symbol.upper(), symbol.upper()) + 'USD'
+        url = f'https://api.kraken.com/0/public/OHLC?pair={kraken_symbol}&interval=1440'
+        async with session.get(url) as response:
+            if response.status != 200:
+                logger.error(f"[Kraken] Failed to fetch historical for {symbol}: HTTP {response.status}")
+                return []
+            data = await response.json()
         pair = list(data['result'].keys())[0]
         ohlc = data['result'][pair][-days:]
-        result = [float(day[6]) for day in ohlc]
-        return result
-    except Exception:
+        return [float(day[6]) for day in ohlc]
+    except Exception as e:
+        logger.error(f"[Kraken] Exception fetching historical for {symbol}: {e}")
         return []
 
 def fetch_kraken_historical(symbol, days=7):
@@ -341,15 +385,16 @@ def fetch_kraken_historical(symbol, days=7):
     return asyncio.run(wrapper())
 
 async def fetch_kucoin_volume_async(symbol, session):
-    url = f'https://api.kucoin.com/api/v1/market/stats?symbol={symbol.upper()}-USDT'
-    async with session.get(url) as response:
-        if response.status != 200:
-            return None
-        data = await response.json()
     try:
-        volume = float(data['data']['volValue'])
-        return volume
-    except Exception:
+        url = f'https://api.kucoin.com/api/v1/market/stats?symbol={symbol.upper()}-USDT'
+        async with session.get(url) as response:
+            if response.status != 200:
+                logger.error(f"[KuCoin] Failed to fetch volume for {symbol}: HTTP {response.status}")
+                return None
+            data = await response.json()
+        return float(data['data']['volValue'])
+    except Exception as e:
+        logger.error(f"[KuCoin] Exception fetching volume for {symbol}: {e}")
         return None
 
 def fetch_kucoin_volume(symbol):
@@ -359,15 +404,16 @@ def fetch_kucoin_volume(symbol):
     return asyncio.run(wrapper())
 
 async def fetch_kucoin_historical_async(symbol, days, session):
-    url = f'https://api.kucoin.com/api/v1/market/candles?type=1day&symbol={symbol.upper()}-USDT&limit={days}'
-    async with session.get(url) as response:
-        if response.status != 200:
-            return []
-        data = await response.json()
     try:
-        result = [float(day[6]) for day in data['data']]
-        return result
-    except Exception:
+        url = f'https://api.kucoin.com/api/v1/market/candles?type=1day&symbol={symbol.upper()}-USDT&limit={days}'
+        async with session.get(url) as response:
+            if response.status != 200:
+                logger.error(f"[KuCoin] Failed to fetch historical for {symbol}: HTTP {response.status}")
+                return []
+            data = await response.json()
+        return [float(day[6]) for day in data['data']]
+    except Exception as e:
+        logger.error(f"[KuCoin] Exception fetching historical for {symbol}: {e}")
         return []
 
 def fetch_kucoin_historical(symbol, days=7):
@@ -378,14 +424,16 @@ def fetch_kucoin_historical(symbol, days=7):
 
 # --- OKX ---
 async def fetch_okx_volume_async(symbol, session):
-    url = f'https://www.okx.com/api/v5/market/ticker?instId={symbol.upper()}-USDT'
-    async with session.get(url) as response:
-        if response.status != 200:
-            return None
-        data = await response.json()
     try:
+        url = f'https://www.okx.com/api/v5/market/ticker?instId={symbol.upper()}-USDT'
+        async with session.get(url) as response:
+            if response.status != 200:
+                logger.error(f"[OKX] Failed to fetch volume for {symbol}: HTTP {response.status}")
+                return None
+            data = await response.json()
         return float(data['data'][0]['volCcy24h'])
-    except Exception:
+    except Exception as e:
+        logger.error(f"[OKX] Exception fetching volume for {symbol}: {e}")
         return None
 
 def fetch_okx_volume(symbol):
@@ -395,14 +443,16 @@ def fetch_okx_volume(symbol):
     return asyncio.run(wrapper())
 
 async def fetch_okx_historical_async(symbol, days, session):
-    url = f'https://www.okx.com/api/v5/market/history-candles?instId={symbol.upper()}-USDT&bar=1D&limit={days}'
-    async with session.get(url) as response:
-        if response.status != 200:
-            return []
-        data = await response.json()
     try:
+        url = f'https://www.okx.com/api/v5/market/history-candles?instId={symbol.upper()}-USDT&bar=1D&limit={days}'
+        async with session.get(url) as response:
+            if response.status != 200:
+                logger.error(f"[OKX] Failed to fetch historical for {symbol}: HTTP {response.status}")
+                return []
+            data = await response.json()
         return [float(day[5]) for day in data['data']]
-    except Exception:
+    except Exception as e:
+        logger.error(f"[OKX] Exception fetching historical for {symbol}: {e}")
         return []
 
 def fetch_okx_historical(symbol, days=7):
@@ -413,14 +463,16 @@ def fetch_okx_historical(symbol, days=7):
 
 # --- Bybit ---
 async def fetch_bybit_volume_async(symbol, session):
-    url = f'https://api.bybit.com/v5/market/tickers?category=spot&symbol={symbol.upper()}USDT'
-    async with session.get(url) as response:
-        if response.status != 200:
-            return None
-        data = await response.json()
     try:
+        url = f'https://api.bybit.com/v5/market/tickers?category=spot&symbol={symbol.upper()}USDT'
+        async with session.get(url) as response:
+            if response.status != 200:
+                logger.error(f"[Bybit] Failed to fetch volume for {symbol}: HTTP {response.status}")
+                return None
+            data = await response.json()
         return float(data['result']['list'][0]['quoteVolume24h'])
-    except Exception:
+    except Exception as e:
+        logger.error(f"[Bybit] Exception fetching volume for {symbol}: {e}")
         return None
 
 def fetch_bybit_volume(symbol):
@@ -430,14 +482,16 @@ def fetch_bybit_volume(symbol):
     return asyncio.run(wrapper())
 
 async def fetch_bybit_historical_async(symbol, days, session):
-    url = f'https://api.bybit.com/v5/market/history-candles?category=spot&symbol={symbol.upper()}USDT&interval=1D&limit={days}'
-    async with session.get(url) as response:
-        if response.status != 200:
-            return []
-        data = await response.json()
     try:
+        url = f'https://api.bybit.com/v5/market/history-candles?category=spot&symbol={symbol.upper()}USDT&interval=1D&limit={days}'
+        async with session.get(url) as response:
+            if response.status != 200:
+                logger.error(f"[Bybit] Failed to fetch historical for {symbol}: HTTP {response.status}")
+                return []
+            data = await response.json()
         return [float(day[5]) for day in data['result']['list']]
-    except Exception:
+    except Exception as e:
+        logger.error(f"[Bybit] Exception fetching historical for {symbol}: {e}")
         return []
 
 def fetch_bybit_historical(symbol, days=7):
