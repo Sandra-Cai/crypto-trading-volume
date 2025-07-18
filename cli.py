@@ -159,6 +159,7 @@ def main():
         coins = fetch_coingecko_trending()[:args.top]
 
     rows = []
+    failed_exchanges = set()
     for coin in coins:
         symbol = coin.upper()
         volumes = fetch_all_volumes(symbol)
@@ -167,11 +168,17 @@ def main():
         
         if args.exchange == 'all':
             for ex, vol in volumes.items():
-                print(f'  {ex}: {vol if vol else "Not found"}')
+                if vol is None:
+                    print(f'  {ex}: Unavailable (API error)')
+                    failed_exchanges.add(ex)
+                else:
+                    print(f'  {ex}: {vol:,.2f}')
                 row = {'coin': symbol, 'exchange': ex, 'price_usd': price, 'volume': vol}
                 if args.trend:
                     hist = fetch_all_historical(symbol)
-                    row['trend'] = hist[ex]
+                    row['trend'] = hist[ex] if hist[ex] else 'Unavailable'
+                    if not hist[ex]:
+                        failed_exchanges.add(ex)
                 rows.append(row)
                 # Alert logic
                 if args.alert_volume and vol and vol > args.alert_volume:
@@ -180,11 +187,17 @@ def main():
                     print(f'  ALERT: {symbol} price {price:,.2f} exceeds {args.alert_price}')
         else:
             vol = volumes.get(args.exchange)
-            print(f'  {args.exchange}: {vol if vol else "Not found"}')
+            if vol is None:
+                print(f'  {args.exchange}: Unavailable (API error)')
+                failed_exchanges.add(args.exchange)
+            else:
+                print(f'  {args.exchange}: {vol:,.2f}')
             row = {'coin': symbol, 'exchange': args.exchange, 'price_usd': price, 'volume': vol}
             if args.trend:
                 hist = fetch_all_historical(symbol)
-                row['trend'] = hist.get(args.exchange)
+                row['trend'] = hist.get(args.exchange) if hist.get(args.exchange) else 'Unavailable'
+                if not hist.get(args.exchange):
+                    failed_exchanges.add(args.exchange)
             rows.append(row)
             # Alert logic
             if args.alert_volume and vol and vol > args.alert_volume:
@@ -285,6 +298,9 @@ def main():
             for row in rows:
                 writer.writerow(row)
         print(f'Exported results to {args.export_csv}')
+
+    if failed_exchanges:
+        print("\nSome exchanges failed to return data: " + ", ".join(sorted(failed_exchanges)) + ". This may be due to API downtime or rate limits.")
 
 if __name__ == '__main__':
     main() 
