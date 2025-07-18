@@ -397,6 +397,64 @@ def fetch_onchain_stats(coin):
             pass
     return data
 
+def add_dashboard_prefs_column():
+    with app.app_context():
+        db = get_db()
+        try:
+            db.execute('ALTER TABLE users ADD COLUMN dashboard_prefs TEXT')
+            db.commit()
+        except Exception:
+            pass  # Column may already exist
+
+# Call this on startup to ensure column exists
+add_dashboard_prefs_column()
+
+# --- Dashboard customization page ---
+@app.route('/customize_dashboard', methods=['GET', 'POST'])
+@login_required
+def customize_dashboard():
+    user_id = session.get('user_id')
+    db = get_db()
+    # Default widget options
+    widget_options = [
+        ('show_onchain', 'On-chain Stats'),
+        ('show_whale', 'Whale Alerts'),
+        ('show_trend', 'Volume Trend'),
+        ('show_correlation', 'Price-Volume Correlation'),
+        ('show_news', 'News & Sentiment'),
+    ]
+    # Load current prefs
+    row = query_db('SELECT dashboard_prefs FROM users WHERE id = ?', [user_id], one=True)
+    prefs = {k: True for k, _ in widget_options}
+    if row and row[0]:
+        try:
+            prefs.update(json.loads(row[0]))
+        except Exception:
+            pass
+    if request.method == 'POST':
+        for k, _ in widget_options:
+            prefs[k] = bool(request.form.get(k))
+        db.execute('UPDATE users SET dashboard_prefs = ? WHERE id = ?', (json.dumps(prefs), user_id))
+        db.commit()
+        return redirect(url_for('index'))
+    return render_template_string('''
+    <html><head><title>Customize Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    </head><body class="container py-5">
+    <h2>Customize Your Dashboard</h2>
+    <form method="post" class="mb-4">
+        {% for k, label in widget_options %}
+        <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="{{ k }}" id="{{ k }}" {% if prefs[k] %}checked{% endif %}>
+            <label class="form-check-label" for="{{ k }}">{{ label }}</label>
+        </div>
+        {% endfor %}
+        <button class="btn btn-primary" type="submit">Save Preferences</button>
+    </form>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Dashboard</a>
+    </body></html>
+    ''', widget_options=widget_options, prefs=prefs)
+
 @app.route('/', methods=['GET', 'POST'])
 @login_required
 def index():
@@ -516,6 +574,16 @@ def index():
     whale_alerts = fetch_whale_alerts(selected_coin)
     onchain_stats = fetch_onchain_stats(selected_coin)
 
+    # Load user dashboard widget preferences
+    user_id = session.get('user_id')
+    row = query_db('SELECT dashboard_prefs FROM users WHERE id = ?', [user_id], one=True)
+    widget_prefs = {'show_onchain': True, 'show_whale': True, 'show_trend': True, 'show_correlation': True, 'show_news': True}
+    if row and row[0]:
+        try:
+            widget_prefs.update(json.loads(row[0]))
+        except Exception:
+            pass
+
     return render_template_string('''
     <html>
     <head>
@@ -533,7 +601,10 @@ def index():
             </select>
             <button class="btn btn-secondary btn-sm" type="submit">{{ t('update') }}</button>
         </form>
-        <div class="d-flex justify-content-end mb-2"><a href="{{ url_for('logout') }}" class="btn btn-outline-secondary">{{ t('logout') }}</a></div>
+        <div class="d-flex justify-content-end mb-2">
+            <a href="{{ url_for('customize_dashboard') }}" class="btn btn-outline-primary me-2">{{ t('customize_dashboard') }}</a>
+            <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary">{{ t('logout') }}</a>
+        </div>
         <h1 class="mb-4">{{ t('crypto_trading_volume_dashboard') }}</h1>
         <form method="post" enctype="multipart/form-data" class="row g-3 mb-4">
             <div class="col-12 col-md-2">
@@ -766,20 +837,7 @@ def index():
             </select>
             <button class="btn btn-primary mt-2" type="submit">{{ t('save_favorites') }}</button>
         </form>
-        <h2>News & Sentiment</h2>
-        <ul class="list-group mb-4">
-            {% for headline, sentiment in news_with_sentiment %}
-            <li class="list-group-item d-flex justify-content-between align-items-center">
-                {{ headline }}
-                {% if sentiment == 'positive' %}<span class="badge bg-success">Positive</span>{% endif %}
-                {% if sentiment == 'negative' %}<span class="badge bg-danger">Negative</span>{% endif %}
-                {% if sentiment == 'neutral' %}<span class="badge bg-secondary">Neutral</span>{% endif %}
-            </li>
-            {% endfor %}
-            {% if not news_with_sentiment %}
-            <li class="list-group-item">No news found for this coin.</li>
-            {% endif %}
-        </ul>
+        {% if widget_prefs.show_onchain %}
         <h2>Advanced Analytics</h2>
         <div class="mb-3 card p-3 shadow-sm">
             <b>On-chain Stats:</b><br>
@@ -789,6 +847,8 @@ def index():
                 <li class="list-group-item">Total Volume: <b>{{ onchain_stats.total_volume }}</b></li>
             </ul>
         </div>
+        {% endif %}
+        {% if widget_prefs.show_whale %}
         <div class="mb-3 card p-3 shadow-sm">
             <b>Recent Whale Transactions:</b>
             <ul class="list-group">
@@ -803,9 +863,34 @@ def index():
                 {% endif %}
             </ul>
         </div>
+        {% endif %}
+        {% if widget_prefs.show_correlation and correlation_results %}
+        <div class="alert alert-info">
+            <h5>{{ t('price_volume_correlation') }}:</h5>
+            {% for ex, corr in correlation_results.items() %}
+            <div>{{ ex }}: {{ "%.3f"|format(corr) }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if widget_prefs.show_news %}
+        <h2>News & Sentiment</h2>
+        <ul class="list-group mb-4">
+            {% for headline, sentiment in news_with_sentiment %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                {{ headline }}
+                {% if sentiment == 'positive' %}<span class="badge bg-success">Positive</span>{% endif %}
+                {% if sentiment == 'negative' %}<span class="badge bg-danger">Negative</span>{% endif %}
+                {% if sentiment == 'neutral' %}<span class="badge bg-secondary">Neutral</span>{% endif %}
+            </li>
+            {% endfor %}
+            {% if not news_with_sentiment %}
+            <li class="list-group-item">No news found for this coin.</li>
+            {% endif %}
+        </ul>
+        {% endif %}
     </body>
     </html>
-    ''', t=t, lang=lang, coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days, user_favorites=user_favorites, news_with_sentiment=news_with_sentiment, whale_alerts=whale_alerts, onchain_stats=onchain_stats, failed_exchanges=failed_exchanges)
+    ''', t=t, lang=lang, coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days, user_favorites=user_favorites, news_with_sentiment=news_with_sentiment, whale_alerts=whale_alerts, onchain_stats=onchain_stats, failed_exchanges=failed_exchanges, widget_prefs=widget_prefs)
 
 if __name__ == '__main__':
     init_db() # Initialize database on startup
