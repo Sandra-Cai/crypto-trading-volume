@@ -9,6 +9,9 @@ import io
 import threading
 import sqlite3
 import hashlib
+import time
+import os
+import json
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Change this in production
@@ -335,23 +338,64 @@ def settings():
     </body></html>
     ''', telegram_id=telegram_id, discord_webhook=discord_webhook)
 
-# --- Advanced Analytics: Whale Alerts & On-chain Metrics ---
+# --- Enhanced Whale Alerts (mocked, with Redis cache) ---
 def fetch_whale_alerts(coin):
-    # For demo, use Whale Alert public API (mock if no API key)
-    # https://docs.whale-alert.io/
-    # We'll mock with a static example for now
+    key = f'whale_alerts_{coin.lower()}'
+    if redis_client:
+        cached = redis_client.get(key)
+        if cached:
+            try:
+                return json.loads(cached)
+            except Exception:
+                pass
+    # Demo/mock data for several coins
+    data = []
     if coin.lower() == 'bitcoin':
-        return [
+        data = [
             {'amount': 1200, 'from': 'ExchangeA', 'to': 'Wallet', 'timestamp': '2024-05-01 12:00', 'txid': 'abc123'},
             {'amount': 800, 'from': 'Wallet', 'to': 'ExchangeB', 'timestamp': '2024-05-01 10:30', 'txid': 'def456'},
         ]
-    return []
+    elif coin.lower() == 'ethereum':
+        data = [
+            {'amount': 5000, 'from': 'ExchangeC', 'to': 'Wallet', 'timestamp': '2024-05-01 11:00', 'txid': 'eth789'},
+            {'amount': 3000, 'from': 'Wallet', 'to': 'ExchangeD', 'timestamp': '2024-05-01 09:45', 'txid': 'eth012'},
+        ]
+    elif coin.lower() == 'solana':
+        data = [
+            {'amount': 100000, 'from': 'ExchangeE', 'to': 'Wallet', 'timestamp': '2024-05-01 08:00', 'txid': 'sol345'},
+        ]
+    if redis_client:
+        try:
+            redis_client.setex(key, 300, json.dumps(data))
+        except Exception:
+            pass
+    return data
 
+# --- Enhanced On-chain Stats (mocked, with Redis cache) ---
 def fetch_onchain_stats(coin):
-    # For demo, mock some stats
+    key = f'onchain_stats_{coin.lower()}'
+    if redis_client:
+        cached = redis_client.get(key)
+        if cached:
+            try:
+                return json.loads(cached)
+            except Exception:
+                pass
+    # Demo/mock data for several coins
     if coin.lower() == 'bitcoin':
-        return {'active_addresses': 950000, 'large_transfers': 120, 'total_volume': 3500000}
-    return {'active_addresses': 0, 'large_transfers': 0, 'total_volume': 0}
+        data = {'active_addresses': 950000, 'large_transfers': 120, 'total_volume': 3500000}
+    elif coin.lower() == 'ethereum':
+        data = {'active_addresses': 600000, 'large_transfers': 80, 'total_volume': 2100000}
+    elif coin.lower() == 'solana':
+        data = {'active_addresses': 150000, 'large_transfers': 20, 'total_volume': 500000}
+    else:
+        data = {'active_addresses': 0, 'large_transfers': 0, 'total_volume': 0}
+    if redis_client:
+        try:
+            redis_client.setex(key, 300, json.dumps(data))
+        except Exception:
+            pass
+    return data
 
 @app.route('/', methods=['GET', 'POST'])
 @login_required
@@ -737,19 +781,21 @@ def index():
             {% endif %}
         </ul>
         <h2>Advanced Analytics</h2>
-        <div class="mb-3">
+        <div class="mb-3 card p-3 shadow-sm">
             <b>On-chain Stats:</b><br>
-            Active Addresses: {{ onchain_stats.active_addresses }}<br>
-            Large Transfers: {{ onchain_stats.large_transfers }}<br>
-            Total Volume: {{ onchain_stats.total_volume }}
+            <ul class="list-group list-group-flush mb-2">
+                <li class="list-group-item">Active Addresses: <b>{{ onchain_stats.active_addresses }}</b></li>
+                <li class="list-group-item">Large Transfers: <b>{{ onchain_stats.large_transfers }}</b></li>
+                <li class="list-group-item">Total Volume: <b>{{ onchain_stats.total_volume }}</b></li>
+            </ul>
         </div>
-        <div class="mb-3">
+        <div class="mb-3 card p-3 shadow-sm">
             <b>Recent Whale Transactions:</b>
             <ul class="list-group">
                 {% for tx in whale_alerts %}
                 <li class="list-group-item">
-                    <b>{{ tx.amount }}</b> {{ selected_coin.upper() }} from {{ tx.from }} to {{ tx.to }} at {{ tx.timestamp }}<br>
-                    TxID: {{ tx.txid }}
+                    <b>{{ tx.amount }}</b> {{ selected_coin.upper() }} from <b>{{ tx.from }}</b> to <b>{{ tx.to }}</b> at <b>{{ tx.timestamp }}</b><br>
+                    TxID: <code>{{ tx.txid }}</code>
                 </li>
                 {% endfor %}
                 {% if not whale_alerts %}
