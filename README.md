@@ -148,6 +148,37 @@ Compare trading volumes across6 major exchanges:
 - Aggregated data for comprehensive market view
 - Exchange-specific trend analysis
 
+## Background Tasking (Celery)
+
+The platform uses Celery with Redis for background jobs such as periodic data refresh and alerting.
+
+### Running with Docker Compose
+
+Docker Compose will automatically start Redis and a Celery worker:
+
+```bash
+docker-compose up -d
+```
+
+### Manual Usage
+
+1. Start Redis:
+   ```bash
+   docker run -p 6379:6379 redis:7
+   ```
+2. Start the Celery worker:
+   ```bash
+   CELERY_BROKER_URL=redis://localhost:6379/0 CELERY_RESULT_BACKEND=redis://localhost:6379/0 celery -A tasks worker --loglevel=info
+   ```
+3. (Optional) Start the Celery beat scheduler for periodic jobs:
+   ```bash
+   celery -A tasks beat --loglevel=info
+   ```
+
+### What does it do?
+- Every 10 minutes, trending coins and their volumes are refreshed in the background (see `tasks.py`).
+- You can add more background jobs for alerting, analytics, etc.
+
 ## Deployment
 
 ### Docker Deployment
