@@ -378,6 +378,15 @@ def index():
     spike_alerts = []
     correlation_results = {}
     
+    # --- Error feedback for missing data ---
+    failed_exchanges = [ex for ex in exchanges if volumes[ex] is None]
+    if show_trend and hist:
+        for ex in exchanges:
+            vols = hist[ex]
+            if not vols:
+                failed_exchanges.append(ex)
+    failed_exchanges = sorted(set(failed_exchanges))
+
     if show_trend and hist:
         for ex in exchanges:
             vols = hist[ex]
@@ -543,6 +552,11 @@ def index():
                 <button class="btn btn-primary w-100" type="submit">{{ t('update') }}</button>
             </div>
         </form>
+        {% if failed_exchanges %}
+        <div class="alert alert-warning">
+            <b>Some exchanges failed to return data:</b> {{ failed_exchanges|join(', ') }}. This may be due to API downtime or rate limits.
+        </div>
+        {% endif %}
         <h2 class="mb-3">{{ selected_coin.upper() }} ({{ t('price') }}: {{ price if price else 'N/A' }} USD)</h2>
         {% if alert_msgs %}
         <div class="alert alert-danger">
@@ -567,7 +581,36 @@ def index():
             {% endfor %}
         </div>
         {% endif %}
-        <div class="mb-4" id="live-chart">{{ plot_div|safe }}</div>
+        <div class="mb-4" id="live-chart">
+            {{ plot_div|safe }}
+            <ul class="list-group mt-2">
+            {% for ex in exchanges %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    {{ ex }}
+                    {% if volumes[ex] is none %}
+                        <span class="badge bg-danger">Unavailable (API error)</span>
+                    {% else %}
+                        <span class="badge bg-primary">{{ volumes[ex]|round(2) }}</span>
+                    {% endif %}
+                </li>
+            {% endfor %}
+            </ul>
+        </div>
+        {% if show_trend and hist %}
+        <div class="mb-4">
+            {% for ex in exchanges %}
+                <div class="mb-2">
+                    <b>{{ ex }} 7-day trend:</b>
+                    {% if hist[ex] and hist[ex]|length > 0 %}
+                        <!-- Trend chart is already in trend_div -->
+                    {% else %}
+                        <span class="badge bg-danger">Unavailable (API error)</span>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            {{ trend_div|safe }}
+        </div>
+        {% endif %}
         {% if live and selected_exchange == 'binance' %}
         <script>
         const ws = new WebSocket('wss://stream.binance.com:9443/ws/{{ selected_coin.lower() }}usdt@ticker');
@@ -579,7 +622,6 @@ def index():
         };
         </script>
         {% endif %}
-        <div class="mb-4">{{ trend_div|safe }}</div>
         {% if portfolio_results %}
         <h2>{{ t('portfolio_tracking') }}</h2>
         <p>{{ t('total_portfolio_value') }}: <strong>{{ portfolio_results.total_value | round(2) }} USD</strong></p>
@@ -717,7 +759,7 @@ def index():
         </div>
     </body>
     </html>
-    ''', t=t, lang=lang, coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days, user_favorites=user_favorites, news_with_sentiment=news_with_sentiment, whale_alerts=whale_alerts, onchain_stats=onchain_stats)
+    ''', t=t, lang=lang, coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days, user_favorites=user_favorites, news_with_sentiment=news_with_sentiment, whale_alerts=whale_alerts, onchain_stats=onchain_stats, failed_exchanges=failed_exchanges)
 
 if __name__ == '__main__':
     init_db() # Initialize database on startup
