@@ -447,25 +447,53 @@ def fetch_bybit_historical(symbol, days=7):
     return asyncio.run(wrapper())
 
 # --- Enhanced Aggregated fetch ---
-def fetch_all_volumes(symbol):
+async def fetch_all_volumes_async(symbol, session):
+    results = await asyncio.gather(
+        fetch_binance_volume_async(symbol, session),
+        fetch_coinbase_volume_async(symbol, session),
+        fetch_kraken_volume_async(symbol, session),
+        fetch_kucoin_volume_async(symbol, session),
+        fetch_okx_volume_async(symbol, session),
+        fetch_bybit_volume_async(symbol, session)
+    )
     return {
-        'binance': fetch_binance_volume(symbol),
-        'coinbase': fetch_coinbase_volume(symbol),
-        'kraken': fetch_kraken_volume(symbol),
-        'kucoin': fetch_kucoin_volume(symbol),
-        'okx': fetch_okx_volume(symbol),
-        'bybit': fetch_bybit_volume(symbol)
+        'binance': results[0],
+        'coinbase': results[1],
+        'kraken': results[2],
+        'kucoin': results[3],
+        'okx': results[4],
+        'bybit': results[5]
+    }
+
+def fetch_all_volumes(symbol):
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_all_volumes_async(symbol, session)
+    return asyncio.run(wrapper())
+
+async def fetch_all_historical_async(symbol, days, session):
+    results = await asyncio.gather(
+        fetch_binance_historical_async(symbol, days, session),
+        fetch_coinbase_historical_async(symbol, days, session),
+        fetch_kraken_historical_async(symbol, days, session),
+        fetch_kucoin_historical_async(symbol, days, session),
+        fetch_okx_historical_async(symbol, days, session),
+        fetch_bybit_historical_async(symbol, days, session)
+    )
+    return {
+        'binance': results[0],
+        'coinbase': results[1],
+        'kraken': results[2],
+        'kucoin': results[3],
+        'okx': results[4],
+        'bybit': results[5]
     }
 
 def fetch_all_historical(symbol, days=7):
-    return {
-        'binance': fetch_binance_historical(symbol, days),
-        'coinbase': fetch_coinbase_historical(symbol, days),
-        'kraken': fetch_kraken_historical(symbol, days),
-        'kucoin': fetch_kucoin_historical(symbol, days),
-        'okx': fetch_okx_historical(symbol, days),
-        'bybit': fetch_bybit_historical(symbol, days)
-    }
+    async def wrapper():
+        async with AiohttpSession() as session:
+            return await fetch_all_historical_async(symbol, days, session)
+    return asyncio.run(wrapper())
 
 # --- Volume Spike Detection ---
 def detect_volume_spike(historical_volumes, threshold=20):
