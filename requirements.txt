@@ -2,3 +2,5 @@ requests
 Flask
 plotly 
 aiohttp 
+celery
+redis 
