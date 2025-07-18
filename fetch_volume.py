@@ -6,6 +6,8 @@ import json
 import asyncio
 import aiohttp
 import logging
+import os
+import redis
 
 # Set up a default logger
 logger = logging.getLogger("fetch_volume")
@@ -15,14 +17,37 @@ logging.basicConfig(level=logging.INFO)
 _cache = {}
 _cache_expiry = 60  # seconds
 
+# --- Redis cache setup ---
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+REDIS_CACHE_EXPIRY = int(os.environ.get('REDIS_CACHE_EXPIRY', '60'))  # seconds
+try:
+    redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+except Exception:
+    redis_client = None
+
+# --- Enhanced cache_get and cache_set ---
 def cache_get(key):
+    # Try in-memory cache first
     entry = _cache.get(key)
     if entry and (time.time() - entry['time'] < _cache_expiry):
         return entry['value']
+    # Try Redis cache
+    if redis_client:
+        value = redis_client.get(key)
+        if value is not None:
+            try:
+                return json.loads(value)
+            except Exception:
+                return value
     return None
 
 def cache_set(key, value):
     _cache[key] = {'value': value, 'time': time.time()}
+    if redis_client:
+        try:
+            redis_client.setex(key, REDIS_CACHE_EXPIRY, json.dumps(value))
+        except Exception:
+            pass
 
 # --- Async HTTP Session Context ---
 class AiohttpSession:
