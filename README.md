@@ -216,3 +216,19 @@ Contributions are welcome! Please open issues or submit pull requests for new fe
 
 ## License
 This project is licensed under the MIT License.
+
+## Performance
+- All exchange and market data fetching is now fully asynchronous, powered by [aiohttp](https://docs.aiohttp.org/), for high performance and scalability.
+
+## Requirements
+- Python 3.8+
+- aiohttp
+- requests
+- flask
+- plotly
+- (see requirements.txt for full list)
+
+## Installation
+```bash
+pip install -r requirements.txt
+```
