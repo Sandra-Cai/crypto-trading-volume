@@ -263,3 +263,56 @@ This project is licensed under the MIT License.
 ```bash
 pip install -r requirements.txt
 ```
+
+## Public API
+
+The platform exposes a REST API for third-party integrations and power users.
+
+### Endpoints
+
+- `GET /api/trending` — Get trending coins (from CoinGecko)
+- `GET /api/volumes/<coin>` — Get 24h trading volumes for a coin across all exchanges
+- `GET /api/historical/<coin>` — Get historical volume data for a coin
+- `GET /api/market_data/<coin>` — Get market data for a coin (market cap, price change, etc.)
+- `GET /api/onchain/<coin>` — Get on-chain stats for a coin
+- `GET /api/whale_alerts/<coin>` — Get recent whale transactions for a coin
+- `GET /api/portfolio` — Get user portfolio (favorites); requires API key
+
+### Authentication
+
+- Endpoints under `/api/portfolio` require an API key.
+- Pass your API key in the `X-API-KEY` header.
+- (For demo, the API key is your password; in production, use a dedicated API key field.)
+
+### Example Usage
+
+#### Get trending coins
+```bash
+curl https://yourdomain/api/trending
+```
+
+#### Get volumes for Bitcoin
+```bash
+curl https://yourdomain/api/volumes/bitcoin
+```
+
+#### Get user portfolio (with API key)
+```bash
+curl -H "X-API-KEY: <your-api-key>" https://yourdomain/api/portfolio
+```
+
+### Response Format
+All endpoints return JSON. Example:
+```json
+{
+  "coin": "bitcoin",
+  "volumes": {
+    "binance": 123456.78,
+    "coinbase": 23456.12,
+    ...
+  }
+}
+```
+
+### Rate Limits
+- Please respect fair use. For high-volume or commercial use, contact the maintainers.
