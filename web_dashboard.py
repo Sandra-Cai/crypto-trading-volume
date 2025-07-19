@@ -312,6 +312,17 @@ def add_alert_settings_column():
         db.execute('''ALTER TABLE users ADD COLUMN discord_webhook TEXT''')
         db.commit()
 
+def add_webhook_columns():
+    with app.app_context():
+        db = get_db()
+        try:
+            db.execute('ALTER TABLE users ADD COLUMN webhook_url TEXT')
+            db.execute('ALTER TABLE users ADD COLUMN webhook_alert_types TEXT')
+            db.commit()
+        except Exception:
+            pass
+add_webhook_columns()
+
 # --- Settings page for alerts ---
 @app.route('/settings', methods=['GET', 'POST'])
 @login_required
@@ -322,12 +333,18 @@ def settings():
     if request.method == 'POST':
         telegram_id = request.form.get('telegram_id', '')
         discord_webhook = request.form.get('discord_webhook', '')
-        db.execute('UPDATE users SET telegram_id = ?, discord_webhook = ? WHERE id = ?', (telegram_id, discord_webhook, user_id))
+        webhook_url = request.form.get('webhook_url', '')
+        webhook_alert_types = ','.join(request.form.getlist('webhook_alert_types'))
+        db.execute('UPDATE users SET telegram_id = ?, discord_webhook = ?, webhook_url = ?, webhook_alert_types = ? WHERE id = ?',
+                   (telegram_id, discord_webhook, webhook_url, webhook_alert_types, user_id))
         db.commit()
         return redirect(url_for('settings'))
-    row = query_db('SELECT telegram_id, discord_webhook FROM users WHERE id = ?', [user_id], one=True)
+    row = query_db('SELECT telegram_id, discord_webhook, webhook_url, webhook_alert_types FROM users WHERE id = ?', [user_id], one=True)
     telegram_id = row[0] if row else ''
     discord_webhook = row[1] if row else ''
+    webhook_url = row[2] if row and len(row) > 2 else ''
+    webhook_alert_types = row[3].split(',') if row and row[3] else []
+    alert_type_options = ['volume_spike', 'price_spike', 'whale_alert']
     return render_template_string('''
     <html><head><title>Alert Settings</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
@@ -336,11 +353,20 @@ def settings():
     <form method="post" class="w-100 w-md-50 mx-auto">
         <div class="mb-3"><label class="form-label">Telegram Chat ID:</label><input class="form-control" type="text" name="telegram_id" value="{{ telegram_id }}"></div>
         <div class="mb-3"><label class="form-label">Discord Webhook URL:</label><input class="form-control" type="text" name="discord_webhook" value="{{ discord_webhook }}"></div>
+        <div class="mb-3"><label class="form-label">Webhook URL:</label><input class="form-control" type="text" name="webhook_url" value="{{ webhook_url }}"></div>
+        <div class="mb-3"><label class="form-label">Webhook Alert Types:</label>
+            {% for t in alert_type_options %}
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="webhook_alert_types" value="{{ t }}" id="{{ t }}" {% if t in webhook_alert_types %}checked{% endif %}>
+                <label class="form-check-label" for="{{ t }}">{{ t.replace('_', ' ').title() }}</label>
+            </div>
+            {% endfor %}
+        </div>
         <button class="btn btn-primary" type="submit">Save</button>
     </form>
     <div class="mt-3"><a href="{{ url_for('index') }}">Back to Dashboard</a></div>
     </body></html>
-    ''', telegram_id=telegram_id, discord_webhook=discord_webhook)
+    ''', telegram_id=telegram_id, discord_webhook=discord_webhook, webhook_url=webhook_url, webhook_alert_types=webhook_alert_types, alert_type_options=alert_type_options)
 
 # --- Enhanced Whale Alerts (mocked, with Redis cache) ---
 def fetch_whale_alerts(coin):
@@ -475,6 +501,33 @@ def resend_alert(user_id, channel, message):
         send_discord_alert(discord_webhook, message)
         return True
     return False
+
+# --- Webhook alert sending helper ---
+def send_webhook_alert(user_id, coin, exchange, alert_type, message):
+    user = query_db('SELECT username, webhook_url, webhook_alert_types FROM users WHERE id = ?', [user_id], one=True)
+    if not user:
+        return False
+    username, webhook_url, webhook_alert_types = user
+    if not webhook_url or not webhook_alert_types:
+        return False
+    types = webhook_alert_types.split(',') if webhook_alert_types else []
+    if alert_type not in types:
+        return False
+    import requests
+    payload = {
+        'user': username,
+        'coin': coin,
+        'exchange': exchange,
+        'alert_type': alert_type,
+        'message': message
+    }
+    try:
+        resp = requests.post(webhook_url, json=payload, timeout=5)
+        log_event('webhook_alert', user_id, username, f'Webhook sent: {alert_type} {coin} {exchange} {message} (status {resp.status_code})')
+        return resp.status_code == 200
+    except Exception as e:
+        log_event('webhook_alert', user_id, username, f'Webhook failed: {alert_type} {coin} {exchange} {message} ({e})')
+        return False
 
 # --- Admin dashboard with audit log search/filter and API stats ---
 @app.route('/admin', methods=['GET', 'POST'])
