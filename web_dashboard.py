@@ -12,6 +12,7 @@ import hashlib
 import time
 import os
 import json
+from werkzeug.security import generate_password_hash
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Change this in production
@@ -507,13 +508,76 @@ def log_event(event_type, user_id, username, details):
     db.commit()
 
 # --- Admin dashboard ---
+@app.route('/admin/promote/<int:user_id>')
+@admin_required
+def promote_user(user_id):
+    db = get_db()
+    db.execute('UPDATE users SET is_admin = 1 WHERE id = ?', (user_id,))
+    db.commit()
+    admin = session.get('username')
+    user = query_db('SELECT username FROM users WHERE id = ?', [user_id], one=True)
+    log_event('promote_admin', session.get('user_id'), admin, f'Promoted {user[0]} to admin')
+    return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/demote/<int:user_id>')
+@admin_required
+def demote_user(user_id):
+    db = get_db()
+    db.execute('UPDATE users SET is_admin = 0 WHERE id = ?', (user_id,))
+    db.commit()
+    admin = session.get('username')
+    user = query_db('SELECT username FROM users WHERE id = ?', [user_id], one=True)
+    log_event('demote_admin', session.get('user_id'), admin, f'Demoted {user[0]} from admin')
+    return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/deactivate/<int:user_id>')
+@admin_required
+def deactivate_user(user_id):
+    db = get_db()
+    db.execute('UPDATE users SET password = "DEACTIVATED" WHERE id = ?', (user_id,))
+    db.commit()
+    admin = session.get('username')
+    user = query_db('SELECT username FROM users WHERE id = ?', [user_id], one=True)
+    log_event('deactivate_user', session.get('user_id'), admin, f'Deactivated {user[0]}')
+    return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/reactivate/<int:user_id>', methods=['POST'])
+@admin_required
+def reactivate_user(user_id):
+    new_password = request.form.get('new_password')
+    if not new_password:
+        return 'Password required', 400
+    hashed = hashlib.sha256(new_password.encode()).hexdigest()
+    db = get_db()
+    db.execute('UPDATE users SET password = ? WHERE id = ?', (hashed, user_id))
+    db.commit()
+    admin = session.get('username')
+    user = query_db('SELECT username FROM users WHERE id = ?', [user_id], one=True)
+    log_event('reactivate_user', session.get('user_id'), admin, f'Reactivated {user[0]}')
+    return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/reset_password/<int:user_id>', methods=['POST'])
+@admin_required
+def reset_password(user_id):
+    new_password = request.form.get('new_password')
+    if not new_password:
+        return 'Password required', 400
+    hashed = hashlib.sha256(new_password.encode()).hexdigest()
+    db = get_db()
+    db.execute('UPDATE users SET password = ? WHERE id = ?', (hashed, user_id))
+    db.commit()
+    admin = session.get('username')
+    user = query_db('SELECT username FROM users WHERE id = ?', [user_id], one=True)
+    log_event('reset_password', session.get('user_id'), admin, f'Reset password for {user[0]}')
+    return redirect(url_for('admin_dashboard'))
+
 @app.route('/admin')
 @admin_required
 def admin_dashboard():
     # Recent events
     events = query_db('SELECT event_type, username, details, timestamp FROM event_log ORDER BY timestamp DESC LIMIT 50')
     # User activity
-    users = query_db('SELECT id, username, is_admin FROM users ORDER BY id')
+    users = query_db('SELECT id, username, is_admin, password FROM users ORDER BY id')
     # Background job status (mocked for now)
     celery_status = 'OK (demo)'
     # Cache stats (mocked for now)
@@ -538,10 +602,34 @@ def admin_dashboard():
     <div class="mb-4">
         <h4>User Accounts</h4>
         <table class="table table-bordered table-striped">
-            <thead><tr><th>ID</th><th>Username</th><th>Admin?</th></tr></thead>
+            <thead><tr><th>ID</th><th>Username</th><th>Admin?</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
             {% for u in users %}
-            <tr><td>{{ u[0] }}</td><td>{{ u[1] }}</td><td>{{ 'Yes' if u[2] else 'No' }}</td></tr>
+            <tr>
+                <td>{{ u[0] }}</td>
+                <td>{{ u[1] }}</td>
+                <td>{{ 'Yes' if u[2] else 'No' }}</td>
+                <td>{% if u[3] == 'DEACTIVATED' %}<span class="badge bg-danger">Deactivated</span>{% else %}<span class="badge bg-success">Active</span>{% endif %}</td>
+                <td>
+                    {% if not u[2] %}
+                        <a href="{{ url_for('promote_user', user_id=u[0]) }}" class="btn btn-sm btn-success">Promote to Admin</a>
+                    {% else %}
+                        <a href="{{ url_for('demote_user', user_id=u[0]) }}" class="btn btn-sm btn-warning">Demote Admin</a>
+                    {% endif %}
+                    {% if u[3] != 'DEACTIVATED' %}
+                        <a href="{{ url_for('deactivate_user', user_id=u[0]) }}" class="btn btn-sm btn-danger">Deactivate</a>
+                    {% else %}
+                        <form method="post" action="{{ url_for('reactivate_user', user_id=u[0]) }}" style="display:inline-block">
+                            <input type="password" name="new_password" placeholder="New password" class="form-control form-control-sm d-inline w-auto" required>
+                            <button type="submit" class="btn btn-sm btn-primary">Reactivate</button>
+                        </form>
+                    {% endif %}
+                    <form method="post" action="{{ url_for('reset_password', user_id=u[0]) }}" style="display:inline-block">
+                        <input type="password" name="new_password" placeholder="New password" class="form-control form-control-sm d-inline w-auto" required>
+                        <button type="submit" class="btn btn-sm btn-secondary">Reset Password</button>
+                    </form>
+                </td>
+            </tr>
             {% endfor %}
             </tbody>
         </table>
