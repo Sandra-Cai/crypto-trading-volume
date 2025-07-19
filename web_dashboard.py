@@ -330,15 +330,40 @@ def settings():
     user_id = session.get('user_id')
     db = get_db()
     error = None
+    test_result = None
     if request.method == 'POST':
-        telegram_id = request.form.get('telegram_id', '')
-        discord_webhook = request.form.get('discord_webhook', '')
-        webhook_url = request.form.get('webhook_url', '')
-        webhook_alert_types = ','.join(request.form.getlist('webhook_alert_types'))
-        db.execute('UPDATE users SET telegram_id = ?, discord_webhook = ?, webhook_url = ?, webhook_alert_types = ? WHERE id = ?',
-                   (telegram_id, discord_webhook, webhook_url, webhook_alert_types, user_id))
-        db.commit()
-        return redirect(url_for('settings'))
+        if 'test_webhook' in request.form:
+            # Test webhook logic
+            row = query_db('SELECT webhook_url FROM users WHERE id = ?', [user_id], one=True)
+            webhook_url = row[0] if row else ''
+            if not webhook_url:
+                test_result = ('danger', 'No webhook URL set.')
+            else:
+                import requests
+                payload = {
+                    'user': session.get('username'),
+                    'coin': 'bitcoin',
+                    'exchange': 'binance',
+                    'alert_type': 'test',
+                    'message': 'This is a test webhook from Crypto Trading Volume.'
+                }
+                try:
+                    resp = requests.post(webhook_url, json=payload, timeout=5)
+                    if resp.status_code == 200:
+                        test_result = ('success', 'Webhook test successful!')
+                    else:
+                        test_result = ('danger', f'Webhook test failed (status {resp.status_code})')
+                except Exception as e:
+                    test_result = ('danger', f'Webhook test failed: {e}')
+        else:
+            telegram_id = request.form.get('telegram_id', '')
+            discord_webhook = request.form.get('discord_webhook', '')
+            webhook_url = request.form.get('webhook_url', '')
+            webhook_alert_types = ','.join(request.form.getlist('webhook_alert_types'))
+            db.execute('UPDATE users SET telegram_id = ?, discord_webhook = ?, webhook_url = ?, webhook_alert_types = ? WHERE id = ?',
+                       (telegram_id, discord_webhook, webhook_url, webhook_alert_types, user_id))
+            db.commit()
+            return redirect(url_for('settings'))
     row = query_db('SELECT telegram_id, discord_webhook, webhook_url, webhook_alert_types FROM users WHERE id = ?', [user_id], one=True)
     telegram_id = row[0] if row else ''
     discord_webhook = row[1] if row else ''
@@ -350,6 +375,9 @@ def settings():
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     </head><body class="container py-5">
     <h2>Alert Settings</h2>
+    {% if test_result %}
+    <div class="alert alert-{{ test_result[0] }}">{{ test_result[1] }}</div>
+    {% endif %}
     <form method="post" class="w-100 w-md-50 mx-auto">
         <div class="mb-3"><label class="form-label">Telegram Chat ID:</label><input class="form-control" type="text" name="telegram_id" value="{{ telegram_id }}"></div>
         <div class="mb-3"><label class="form-label">Discord Webhook URL:</label><input class="form-control" type="text" name="discord_webhook" value="{{ discord_webhook }}"></div>
@@ -363,10 +391,11 @@ def settings():
             {% endfor %}
         </div>
         <button class="btn btn-primary" type="submit">Save</button>
+        <button class="btn btn-secondary ms-2" name="test_webhook" value="1" type="submit">Test Webhook</button>
     </form>
     <div class="mt-3"><a href="{{ url_for('index') }}">Back to Dashboard</a></div>
     </body></html>
-    ''', telegram_id=telegram_id, discord_webhook=discord_webhook, webhook_url=webhook_url, webhook_alert_types=webhook_alert_types, alert_type_options=alert_type_options)
+    ''', telegram_id=telegram_id, discord_webhook=discord_webhook, webhook_url=webhook_url, webhook_alert_types=webhook_alert_types, alert_type_options=alert_type_options, test_result=test_result)
 
 # --- Enhanced Whale Alerts (mocked, with Redis cache) ---
 def fetch_whale_alerts(coin):
@@ -502,7 +531,7 @@ def resend_alert(user_id, channel, message):
         return True
     return False
 
-# --- Webhook alert sending helper ---
+# --- Webhook alert sending helper with retry ---
 def send_webhook_alert(user_id, coin, exchange, alert_type, message):
     user = query_db('SELECT username, webhook_url, webhook_alert_types FROM users WHERE id = ?', [user_id], one=True)
     if not user:
@@ -521,13 +550,16 @@ def send_webhook_alert(user_id, coin, exchange, alert_type, message):
         'alert_type': alert_type,
         'message': message
     }
-    try:
-        resp = requests.post(webhook_url, json=payload, timeout=5)
-        log_event('webhook_alert', user_id, username, f'Webhook sent: {alert_type} {coin} {exchange} {message} (status {resp.status_code})')
-        return resp.status_code == 200
-    except Exception as e:
-        log_event('webhook_alert', user_id, username, f'Webhook failed: {alert_type} {coin} {exchange} {message} ({e})')
-        return False
+    for attempt in range(1, 4):
+        try:
+            resp = requests.post(webhook_url, json=payload, timeout=5)
+            log_event('webhook_alert', user_id, username, f'Webhook attempt {attempt}: {alert_type} {coin} {exchange} {message} (status {resp.status_code})')
+            if resp.status_code == 200:
+                return True
+        except Exception as e:
+            log_event('webhook_alert', user_id, username, f'Webhook attempt {attempt} failed: {alert_type} {coin} {exchange} {message} ({e})')
+        time.sleep(1)
+    return False
 
 # --- Admin dashboard with audit log search/filter and API stats ---
 @app.route('/admin', methods=['GET', 'POST'])
