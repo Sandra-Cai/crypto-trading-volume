@@ -14,6 +14,7 @@ import os
 import json
 from werkzeug.security import generate_password_hash
 from datetime import datetime
+import secrets
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Change this in production
@@ -1251,6 +1252,74 @@ def api_portfolio():
     row = query_db('SELECT favorites FROM users WHERE id = ?', [user_id], one=True)
     favorites = row[0].split(',') if row and row[0] else []
     return jsonify({'user': username, 'favorites': favorites})
+
+@app.route('/developer', methods=['GET', 'POST'])
+@login_required
+def developer_portal():
+    user_id = session.get('user_id')
+    username = session.get('username')
+    db = get_db()
+    # API key management
+    if request.method == 'POST' and 'regenerate_api_key' in request.form:
+        new_key = secrets.token_hex(24)
+        db.execute('UPDATE users SET password = ? WHERE id = ?', (new_key, user_id))
+        db.commit()
+    # Get current API key
+    row = query_db('SELECT password, webhook_url, webhook_alert_types FROM users WHERE id = ?', [user_id], one=True)
+    api_key = row[0] if row else ''
+    webhook_url = row[1] if row and len(row) > 1 else ''
+    webhook_alert_types = row[2].split(',') if row and row[2] else []
+    # Recent API usage
+    api_events = query_db('SELECT event_type, details, timestamp FROM event_log WHERE user_id = ? AND event_type LIKE "api_%" ORDER BY timestamp DESC LIMIT 20', [user_id])
+    # Recent webhook deliveries
+    webhook_events = query_db('SELECT details, timestamp FROM event_log WHERE user_id = ? AND event_type = "webhook_alert" ORDER BY timestamp DESC LIMIT 20', [user_id])
+    alert_type_options = ['volume_spike', 'price_spike', 'whale_alert']
+    return render_template_string('''
+    <html><head><title>Developer Portal</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    </head><body class="container py-5">
+    <h2>Developer Portal</h2>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary mb-3">Back to Dashboard</a>
+    <div class="mb-4 card p-3 shadow-sm">
+        <h4>API Key</h4>
+        <div class="input-group mb-2">
+            <input type="text" class="form-control" value="{{ api_key }}" readonly>
+            <form method="post">
+                <button class="btn btn-warning" name="regenerate_api_key" value="1" type="submit">Regenerate</button>
+            </form>
+        </div>
+        <small class="text-muted">Use this key in the <code>X-API-KEY</code> header for authenticated API endpoints.</small>
+    </div>
+    <div class="mb-4 card p-3 shadow-sm">
+        <h4>Webhook Settings</h4>
+        <div><b>Webhook URL:</b> {{ webhook_url or 'Not set' }}</div>
+        <div><b>Alert Types:</b> {% for t in alert_type_options %}{% if t in webhook_alert_types %}<span class="badge bg-primary me-1">{{ t.replace('_', ' ').title() }}</span>{% endif %}{% endfor %}</div>
+        <a href="{{ url_for('settings') }}" class="btn btn-sm btn-outline-primary mt-2">Edit Webhook Settings</a>
+    </div>
+    <div class="mb-4 card p-3 shadow-sm">
+        <h4>Recent API Usage</h4>
+        <table class="table table-bordered table-striped">
+            <thead><tr><th>Type</th><th>Details</th><th>Time</th></tr></thead>
+            <tbody>
+            {% for e in api_events %}
+            <tr><td>{{ e[0] }}</td><td>{{ e[1] }}</td><td>{{ e[2] }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="mb-4 card p-3 shadow-sm">
+        <h4>Recent Webhook Deliveries</h4>
+        <table class="table table-bordered table-striped">
+            <thead><tr><th>Details</th><th>Time</th></tr></thead>
+            <tbody>
+            {% for e in webhook_events %}
+            <tr><td>{{ e[0] }}</td><td>{{ e[1] }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    </body></html>
+    ''', api_key=api_key, webhook_url=webhook_url, webhook_alert_types=webhook_alert_types, alert_type_options=alert_type_options, api_events=api_events, webhook_events=webhook_events)
 
 if __name__ == '__main__':
     init_db() # Initialize database on startup
