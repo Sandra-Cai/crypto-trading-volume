@@ -454,6 +454,28 @@ def log_api_event(event_type, endpoint, user_id=None, username=None, details=Non
                (event_type, user_id, username, f'Endpoint: {endpoint} | {details or ""}'))
     db.commit()
 
+# --- Log alert event helper ---
+def log_alert_event(user_id, username, coin, exchange, alert_type, channel, message):
+    db = get_db()
+    details = f'coin={coin}, exchange={exchange}, type={alert_type}, channel={channel}, message={message}'
+    db.execute('INSERT INTO event_log (event_type, user_id, username, details) VALUES (?, ?, ?, ?)',
+               ('alert', user_id, username, details))
+    db.commit()
+
+# --- Resend alert helper ---
+def resend_alert(user_id, channel, message):
+    user = query_db('SELECT telegram_id, discord_webhook FROM users WHERE id = ?', [user_id], one=True)
+    if not user:
+        return False
+    telegram_id, discord_webhook = user
+    if channel == 'telegram' and telegram_id:
+        send_telegram_alert(telegram_id, message, bot_token=os.environ.get('TELEGRAM_BOT_TOKEN', 'demo'))
+        return True
+    if channel == 'discord' and discord_webhook:
+        send_discord_alert(discord_webhook, message)
+        return True
+    return False
+
 # --- Admin dashboard with audit log search/filter and API stats ---
 @app.route('/admin', methods=['GET', 'POST'])
 @admin_required
@@ -568,6 +590,90 @@ def admin_dashboard():
     </div>
     </body></html>
     ''', events=events, users=users, celery_status=celery_status, cache_stats=cache_stats, api_bar=api_bar)
+
+# --- Alerts management in admin dashboard ---
+@app.route('/admin/alerts', methods=['GET', 'POST'])
+@admin_required
+def admin_alerts():
+    # Filters
+    username = request.form.get('username', '')
+    coin = request.form.get('coin', '')
+    alert_type = request.form.get('alert_type', '')
+    channel = request.form.get('channel', '')
+    date_from = request.form.get('date_from', '')
+    date_to = request.form.get('date_to', '')
+    query = "SELECT id, user_id, username, details, timestamp FROM event_log WHERE event_type = 'alert'"
+    params = []
+    if username:
+        query += ' AND username = ?'
+        params.append(username)
+    if coin:
+        query += " AND details LIKE ?"
+        params.append(f'%coin={coin}%')
+    if alert_type:
+        query += " AND details LIKE ?"
+        params.append(f'%type={alert_type}%')
+    if channel:
+        query += " AND details LIKE ?"
+        params.append(f'%channel={channel}%')
+    if date_from:
+        query += ' AND timestamp >= ?'
+        params.append(date_from)
+    if date_to:
+        query += ' AND timestamp <= ?'
+        params.append(date_to)
+    query += ' ORDER BY timestamp DESC LIMIT 50'
+    alerts = query_db(query, params)
+    # Resend logic
+    if request.method == 'POST' and 'resend_id' in request.form:
+        alert_id = int(request.form['resend_id'])
+        alert = query_db('SELECT user_id, details FROM event_log WHERE id = ?', [alert_id], one=True)
+        if alert:
+            user_id, details = alert
+            # Parse channel and message
+            channel = 'telegram' if 'channel=telegram' in details else 'discord' if 'channel=discord' in details else None
+            msg_start = details.find('message=')
+            message = details[msg_start+8:] if msg_start != -1 else details
+            resend_alert(user_id, channel, message)
+    return render_template_string('''
+    <html><head><title>Alert Management</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    </head><body class="container py-5">
+    <h2>Alert Management</h2>
+    <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary mb-3">Back to Admin Dashboard</a>
+    <form method="post" class="row g-2 mb-3">
+        <div class="col-md-2"><input class="form-control" type="text" name="username" placeholder="Username" value="{{ request.form.get('username', '') }}"></div>
+        <div class="col-md-2"><input class="form-control" type="text" name="coin" placeholder="Coin" value="{{ request.form.get('coin', '') }}"></div>
+        <div class="col-md-2"><input class="form-control" type="text" name="alert_type" placeholder="Alert Type" value="{{ request.form.get('alert_type', '') }}"></div>
+        <div class="col-md-2"><input class="form-control" type="text" name="channel" placeholder="Channel" value="{{ request.form.get('channel', '') }}"></div>
+        <div class="col-md-2"><input class="form-control" type="date" name="date_from" value="{{ request.form.get('date_from', '') }}"></div>
+        <div class="col-md-2"><input class="form-control" type="date" name="date_to" value="{{ request.form.get('date_to', '') }}"></div>
+        <div class="col-md-2"><button class="btn btn-primary" type="submit">Filter</button></div>
+    </form>
+    <table class="table table-bordered table-striped">
+        <thead><tr><th>User</th><th>Coin</th><th>Exchange</th><th>Type</th><th>Channel</th><th>Message</th><th>Time</th><th>Actions</th></tr></thead>
+        <tbody>
+        {% for a in alerts %}
+        <tr>
+            <td>{{ a[2] }}</td>
+            <td>{{ a[3].split('coin=')[1].split(',')[0] if 'coin=' in a[3] else '' }}</td>
+            <td>{{ a[3].split('exchange=')[1].split(',')[0] if 'exchange=' in a[3] else '' }}</td>
+            <td>{{ a[3].split('type=')[1].split(',')[0] if 'type=' in a[3] else '' }}</td>
+            <td>{{ a[3].split('channel=')[1].split(',')[0] if 'channel=' in a[3] else '' }}</td>
+            <td>{{ a[3].split('message=')[1] if 'message=' in a[3] else a[3] }}</td>
+            <td>{{ a[4] }}</td>
+            <td>
+                <form method="post" style="display:inline-block">
+                    <input type="hidden" name="resend_id" value="{{ a[0] }}">
+                    <button type="submit" class="btn btn-sm btn-info">Resend</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </body></html>
+    ''', alerts=alerts)
 
 @app.route('/', methods=['GET', 'POST'])
 @login_required
