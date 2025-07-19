@@ -13,6 +13,7 @@ import time
 import os
 import json
 from werkzeug.security import generate_password_hash
+from datetime import datetime
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Change this in production
@@ -440,66 +441,6 @@ add_event_log_table()
 # Call this on startup to ensure column exists
 add_dashboard_prefs_column()
 
-# --- Dashboard customization page ---
-@app.route('/customize_dashboard', methods=['GET', 'POST'])
-@login_required
-def customize_dashboard():
-    user_id = session.get('user_id')
-    db = get_db()
-    # Default widget options
-    widget_options = [
-        ('show_onchain', 'On-chain Stats'),
-        ('show_whale', 'Whale Alerts'),
-        ('show_trend', 'Volume Trend'),
-        ('show_correlation', 'Price-Volume Correlation'),
-        ('show_news', 'News & Sentiment'),
-    ]
-    # Load current prefs
-    row = query_db('SELECT dashboard_prefs FROM users WHERE id = ?', [user_id], one=True)
-    prefs = {k: True for k, _ in widget_options}
-    if row and row[0]:
-        try:
-            prefs.update(json.loads(row[0]))
-        except Exception:
-            pass
-    if request.method == 'POST':
-        for k, _ in widget_options:
-            prefs[k] = bool(request.form.get(k))
-        db.execute('UPDATE users SET dashboard_prefs = ? WHERE id = ?', (json.dumps(prefs), user_id))
-        db.commit()
-        return redirect(url_for('index'))
-    return render_template_string('''
-    <html><head><title>Customize Dashboard</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
-    </head><body class="container py-5">
-    <h2>Customize Your Dashboard</h2>
-    <form method="post" class="mb-4">
-        {% for k, label in widget_options %}
-        <div class="form-check mb-2">
-            <input class="form-check-input" type="checkbox" name="{{ k }}" id="{{ k }}" {% if prefs[k] %}checked{% endif %}>
-            <label class="form-check-label" for="{{ k }}">{{ label }}</label>
-        </div>
-        {% endfor %}
-        <button class="btn btn-primary" type="submit">Save Preferences</button>
-    </form>
-    <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Dashboard</a>
-    </body></html>
-    ''', widget_options=widget_options, prefs=prefs)
-
-# --- Admin check decorator ---
-def admin_required(f):
-    from functools import wraps
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        user_id = session.get('user_id')
-        if not user_id:
-            return redirect(url_for('login'))
-        row = query_db('SELECT is_admin FROM users WHERE id = ?', [user_id], one=True)
-        if not row or not row[0]:
-            return 'Access denied: Admins only', 403
-        return f(*args, **kwargs)
-    return decorated
-
 # --- Log event helper ---
 def log_event(event_type, user_id, username, details):
     db = get_db()
@@ -507,89 +448,68 @@ def log_event(event_type, user_id, username, details):
                (event_type, user_id, username, details))
     db.commit()
 
-# --- Admin dashboard ---
-@app.route('/admin/promote/<int:user_id>')
-@admin_required
-def promote_user(user_id):
+def log_api_event(event_type, endpoint, user_id=None, username=None, details=None):
     db = get_db()
-    db.execute('UPDATE users SET is_admin = 1 WHERE id = ?', (user_id,))
+    db.execute('INSERT INTO event_log (event_type, user_id, username, details) VALUES (?, ?, ?, ?)',
+               (event_type, user_id, username, f'Endpoint: {endpoint} | {details or ""}'))
     db.commit()
-    admin = session.get('username')
-    user = query_db('SELECT username FROM users WHERE id = ?', [user_id], one=True)
-    log_event('promote_admin', session.get('user_id'), admin, f'Promoted {user[0]} to admin')
-    return redirect(url_for('admin_dashboard'))
 
-@app.route('/admin/demote/<int:user_id>')
-@admin_required
-def demote_user(user_id):
-    db = get_db()
-    db.execute('UPDATE users SET is_admin = 0 WHERE id = ?', (user_id,))
-    db.commit()
-    admin = session.get('username')
-    user = query_db('SELECT username FROM users WHERE id = ?', [user_id], one=True)
-    log_event('demote_admin', session.get('user_id'), admin, f'Demoted {user[0]} from admin')
-    return redirect(url_for('admin_dashboard'))
-
-@app.route('/admin/deactivate/<int:user_id>')
-@admin_required
-def deactivate_user(user_id):
-    db = get_db()
-    db.execute('UPDATE users SET password = "DEACTIVATED" WHERE id = ?', (user_id,))
-    db.commit()
-    admin = session.get('username')
-    user = query_db('SELECT username FROM users WHERE id = ?', [user_id], one=True)
-    log_event('deactivate_user', session.get('user_id'), admin, f'Deactivated {user[0]}')
-    return redirect(url_for('admin_dashboard'))
-
-@app.route('/admin/reactivate/<int:user_id>', methods=['POST'])
-@admin_required
-def reactivate_user(user_id):
-    new_password = request.form.get('new_password')
-    if not new_password:
-        return 'Password required', 400
-    hashed = hashlib.sha256(new_password.encode()).hexdigest()
-    db = get_db()
-    db.execute('UPDATE users SET password = ? WHERE id = ?', (hashed, user_id))
-    db.commit()
-    admin = session.get('username')
-    user = query_db('SELECT username FROM users WHERE id = ?', [user_id], one=True)
-    log_event('reactivate_user', session.get('user_id'), admin, f'Reactivated {user[0]}')
-    return redirect(url_for('admin_dashboard'))
-
-@app.route('/admin/reset_password/<int:user_id>', methods=['POST'])
-@admin_required
-def reset_password(user_id):
-    new_password = request.form.get('new_password')
-    if not new_password:
-        return 'Password required', 400
-    hashed = hashlib.sha256(new_password.encode()).hexdigest()
-    db = get_db()
-    db.execute('UPDATE users SET password = ? WHERE id = ?', (hashed, user_id))
-    db.commit()
-    admin = session.get('username')
-    user = query_db('SELECT username FROM users WHERE id = ?', [user_id], one=True)
-    log_event('reset_password', session.get('user_id'), admin, f'Reset password for {user[0]}')
-    return redirect(url_for('admin_dashboard'))
-
-@app.route('/admin')
+# --- Admin dashboard with audit log search/filter and API stats ---
+@app.route('/admin', methods=['GET', 'POST'])
 @admin_required
 def admin_dashboard():
-    # Recent events
-    events = query_db('SELECT event_type, username, details, timestamp FROM event_log ORDER BY timestamp DESC LIMIT 50')
+    # --- Audit log search/filter form ---
+    event_type = request.form.get('event_type', '')
+    username = request.form.get('username', '')
+    date_from = request.form.get('date_from', '')
+    date_to = request.form.get('date_to', '')
+    query = 'SELECT event_type, username, details, timestamp FROM event_log WHERE 1=1'
+    params = []
+    if event_type:
+        query += ' AND event_type = ?'
+        params.append(event_type)
+    if username:
+        query += ' AND username = ?'
+        params.append(username)
+    if date_from:
+        query += ' AND timestamp >= ?'
+        params.append(date_from)
+    if date_to:
+        query += ' AND timestamp <= ?'
+        params.append(date_to)
+    query += ' ORDER BY timestamp DESC LIMIT 50'
+    events = query_db(query, params)
     # User activity
     users = query_db('SELECT id, username, is_admin, password FROM users ORDER BY id')
     # Background job status (mocked for now)
     celery_status = 'OK (demo)'
     # Cache stats (mocked for now)
     cache_stats = {'redis': 'OK' if redis_client else 'Unavailable'}
+    # --- API usage/error stats ---
+    api_stats = query_db('SELECT event_type, COUNT(*) FROM event_log WHERE event_type LIKE "api_%" GROUP BY event_type')
+    api_labels = [row[0] for row in api_stats]
+    api_counts = [row[1] for row in api_stats]
+    api_bar = ''
+    if api_labels:
+        fig = go.Figure([go.Bar(x=api_labels, y=api_counts)])
+        fig.update_layout(title='API Usage & Error Events', xaxis_title='Event Type', yaxis_title='Count')
+        api_bar = pyo.plot(fig, output_type='div', include_plotlyjs=False)
     return render_template_string('''
     <html><head><title>Admin Dashboard</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     </head><body class="container py-5">
     <h2>Admin Dashboard</h2>
     <a href="{{ url_for('index') }}" class="btn btn-secondary mb-3">Back to Dashboard</a>
     <div class="mb-4">
-        <h4>Recent Events</h4>
+        <h4>Audit Log Search/Filter</h4>
+        <form method="post" class="row g-2 mb-3">
+            <div class="col-md-2"><input class="form-control" type="text" name="event_type" placeholder="Event Type" value="{{ request.form.get('event_type', '') }}"></div>
+            <div class="col-md-2"><input class="form-control" type="text" name="username" placeholder="Username" value="{{ request.form.get('username', '') }}"></div>
+            <div class="col-md-2"><input class="form-control" type="date" name="date_from" value="{{ request.form.get('date_from', '') }}"></div>
+            <div class="col-md-2"><input class="form-control" type="date" name="date_to" value="{{ request.form.get('date_to', '') }}"></div>
+            <div class="col-md-2"><button class="btn btn-primary" type="submit">Filter</button></div>
+        </form>
         <table class="table table-bordered table-striped">
             <thead><tr><th>Type</th><th>User</th><th>Details</th><th>Time</th></tr></thead>
             <tbody>
@@ -598,6 +518,10 @@ def admin_dashboard():
             {% endfor %}
             </tbody>
         </table>
+    </div>
+    <div class="mb-4">
+        <h4>API Usage & Error Stats</h4>
+        <div>{{ api_bar|safe }}</div>
     </div>
     <div class="mb-4">
         <h4>User Accounts</h4>
@@ -643,7 +567,7 @@ def admin_dashboard():
         <div>Redis: <b>{{ cache_stats['redis'] }}</b></div>
     </div>
     </body></html>
-    ''', events=events, users=users, celery_status=celery_status, cache_stats=cache_stats)
+    ''', events=events, users=users, celery_status=celery_status, cache_stats=cache_stats, api_bar=api_bar)
 
 @app.route('/', methods=['GET', 'POST'])
 @login_required
