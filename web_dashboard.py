@@ -1229,7 +1229,7 @@ def api_whale_alerts(coin):
     alerts = fetch_whale_alerts(coin)
     return jsonify({'coin': coin, 'whale_alerts': alerts})
 
-# --- API key authentication for user-specific endpoints ---
+# --- API key authentication for user-specific endpoints with rate limiting and revocation ---
 def require_api_key(f):
     from functools import wraps
     @wraps(f)
@@ -1238,8 +1238,20 @@ def require_api_key(f):
         if not api_key:
             return jsonify({'error': 'API key required'}), 401
         user = query_db('SELECT id, username FROM users WHERE password = ?', [api_key], one=True)
-        if not user:
-            return jsonify({'error': 'Invalid API key'}), 403
+        if not user or api_key in ('', 'REVOKED'):
+            return jsonify({'error': 'Invalid or revoked API key'}), 403
+        # Rate limiting (60 requests/minute)
+        if redis_client:
+            key = f'api_rate_{api_key}'
+            try:
+                count = redis_client.incr(key)
+                if count == 1:
+                    redis_client.expire(key, 60)
+                if count > 60:
+                    ttl = redis_client.ttl(key)
+                    return jsonify({'error': 'Rate limit exceeded', 'retry_after': ttl}), 429
+            except Exception:
+                pass
         g.api_user = user
         return f(*args, **kwargs)
     return decorated
@@ -1260,15 +1272,31 @@ def developer_portal():
     username = session.get('username')
     db = get_db()
     # API key management
-    if request.method == 'POST' and 'regenerate_api_key' in request.form:
-        new_key = secrets.token_hex(24)
-        db.execute('UPDATE users SET password = ? WHERE id = ?', (new_key, user_id))
-        db.commit()
+    if request.method == 'POST':
+        if 'regenerate_api_key' in request.form:
+            new_key = secrets.token_hex(24)
+            db.execute('UPDATE users SET password = ? WHERE id = ?', (new_key, user_id))
+            db.commit()
+        elif 'revoke_api_key' in request.form:
+            db.execute('UPDATE users SET password = ? WHERE id = ?', ('REVOKED', user_id))
+            db.commit()
     # Get current API key
     row = query_db('SELECT password, webhook_url, webhook_alert_types FROM users WHERE id = ?', [user_id], one=True)
     api_key = row[0] if row else ''
     webhook_url = row[1] if row and len(row) > 1 else ''
     webhook_alert_types = row[2].split(',') if row and row[2] else []
+    # Rate limit status (using Redis)
+    rate_limit = 60
+    rate_used = 0
+    rate_reset = 0
+    if redis_client and api_key and api_key not in ('', 'REVOKED'):
+        key = f'api_rate_{api_key}'
+        try:
+            rate_used = int(redis_client.get(key) or 0)
+            ttl = redis_client.ttl(key)
+            rate_reset = max(ttl, 0)
+        except Exception:
+            pass
     # Recent API usage
     api_events = query_db('SELECT event_type, details, timestamp FROM event_log WHERE user_id = ? AND event_type LIKE "api_%" ORDER BY timestamp DESC LIMIT 20', [user_id])
     # Recent webhook deliveries
@@ -1284,11 +1312,23 @@ def developer_portal():
         <h4>API Key</h4>
         <div class="input-group mb-2">
             <input type="text" class="form-control" value="{{ api_key }}" readonly>
-            <form method="post">
+            <form method="post" style="display:inline-block">
                 <button class="btn btn-warning" name="regenerate_api_key" value="1" type="submit">Regenerate</button>
+            </form>
+            <form method="post" style="display:inline-block">
+                <button class="btn btn-danger ms-2" name="revoke_api_key" value="1" type="submit">Revoke</button>
             </form>
         </div>
         <small class="text-muted">Use this key in the <code>X-API-KEY</code> header for authenticated API endpoints.</small>
+        {% if api_key == 'REVOKED' %}
+        <div class="alert alert-danger mt-2">Your API key is revoked. No API access is allowed until you regenerate a new key.</div>
+        {% endif %}
+    </div>
+    <div class="mb-4 card p-3 shadow-sm">
+        <h4>API Rate Limit</h4>
+        <div>Limit: <b>{{ rate_limit }}</b> requests/minute</div>
+        <div>Used: <b>{{ rate_used }}</b></div>
+        <div>Resets in: <b>{{ rate_reset }}</b> seconds</div>
     </div>
     <div class="mb-4 card p-3 shadow-sm">
         <h4>Webhook Settings</h4>
@@ -1319,7 +1359,7 @@ def developer_portal():
         </table>
     </div>
     </body></html>
-    ''', api_key=api_key, webhook_url=webhook_url, webhook_alert_types=webhook_alert_types, alert_type_options=alert_type_options, api_events=api_events, webhook_events=webhook_events)
+    ''', api_key=api_key, webhook_url=webhook_url, webhook_alert_types=webhook_alert_types, alert_type_options=alert_type_options, api_events=api_events, webhook_events=webhook_events, rate_limit=rate_limit, rate_used=rate_used, rate_reset=rate_reset)
 
 if __name__ == '__main__':
     init_db() # Initialize database on startup
