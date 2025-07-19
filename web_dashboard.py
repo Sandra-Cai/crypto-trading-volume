@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, redirect, url_for, session, g
+from flask import Flask, render_template_string, request, redirect, url_for, session, g, jsonify
 from fetch_volume import fetch_coingecko_trending, fetch_all_volumes, fetch_all_historical, detect_volume_spike, calculate_price_volume_correlation
 from trading_bot import TradingBot, create_strategy_config
 import plotly.graph_objs as go
@@ -1111,6 +1111,61 @@ def index():
     </body>
     </html>
     ''', t=t, lang=lang, coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days, user_favorites=user_favorites, news_with_sentiment=news_with_sentiment, whale_alerts=whale_alerts, onchain_stats=onchain_stats, failed_exchanges=failed_exchanges, widget_prefs=widget_prefs)
+
+# --- Public API endpoints ---
+@app.route('/api/trending')
+def api_trending():
+    trending = fetch_coingecko_trending()
+    return jsonify({'trending': trending})
+
+@app.route('/api/volumes/<coin>')
+def api_volumes(coin):
+    volumes = fetch_all_volumes(coin.upper())
+    return jsonify({'coin': coin, 'volumes': volumes})
+
+@app.route('/api/historical/<coin>')
+def api_historical(coin):
+    hist = fetch_all_historical(coin.upper())
+    return jsonify({'coin': coin, 'historical': hist})
+
+@app.route('/api/market_data/<coin>')
+def api_market_data(coin):
+    data = fetch_market_data(coin)
+    return jsonify({'coin': coin, 'market_data': data})
+
+@app.route('/api/onchain/<coin>')
+def api_onchain(coin):
+    stats = fetch_onchain_stats(coin)
+    return jsonify({'coin': coin, 'onchain_stats': stats})
+
+@app.route('/api/whale_alerts/<coin>')
+def api_whale_alerts(coin):
+    alerts = fetch_whale_alerts(coin)
+    return jsonify({'coin': coin, 'whale_alerts': alerts})
+
+# --- API key authentication for user-specific endpoints ---
+def require_api_key(f):
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        api_key = request.headers.get('X-API-KEY')
+        if not api_key:
+            return jsonify({'error': 'API key required'}), 401
+        user = query_db('SELECT id, username FROM users WHERE password = ?', [api_key], one=True)
+        if not user:
+            return jsonify({'error': 'Invalid API key'}), 403
+        g.api_user = user
+        return f(*args, **kwargs)
+    return decorated
+
+@app.route('/api/portfolio')
+@require_api_key
+def api_portfolio():
+    user_id, username = g.api_user
+    # For demo, just return favorites
+    row = query_db('SELECT favorites FROM users WHERE id = ?', [user_id], one=True)
+    favorites = row[0].split(',') if row and row[0] else []
+    return jsonify({'user': username, 'favorites': favorites})
 
 if __name__ == '__main__':
     init_db() # Initialize database on startup
