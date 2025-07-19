@@ -161,6 +161,8 @@ def login():
             session['logged_in'] = True
             session['user_id'] = user[0]
             session['username'] = username
+            # Log login event
+            log_event('login', user[0], username, 'User logged in')
             return redirect(url_for('index'))
         else:
             error = 'Invalid credentials'
@@ -406,6 +408,34 @@ def add_dashboard_prefs_column():
         except Exception:
             pass  # Column may already exist
 
+def add_is_admin_column():
+    with app.app_context():
+        db = get_db()
+        try:
+            db.execute('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0')
+            db.commit()
+        except Exception:
+            pass  # Column may already exist
+
+def add_event_log_table():
+    with app.app_context():
+        db = get_db()
+        try:
+            db.execute('''CREATE TABLE IF NOT EXISTS event_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT,
+                user_id INTEGER,
+                username TEXT,
+                details TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )''')
+            db.commit()
+        except Exception:
+            pass
+
+add_is_admin_column()
+add_event_log_table()
+
 # Call this on startup to ensure column exists
 add_dashboard_prefs_column()
 
@@ -454,6 +484,78 @@ def customize_dashboard():
     <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Dashboard</a>
     </body></html>
     ''', widget_options=widget_options, prefs=prefs)
+
+# --- Admin check decorator ---
+def admin_required(f):
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user_id = session.get('user_id')
+        if not user_id:
+            return redirect(url_for('login'))
+        row = query_db('SELECT is_admin FROM users WHERE id = ?', [user_id], one=True)
+        if not row or not row[0]:
+            return 'Access denied: Admins only', 403
+        return f(*args, **kwargs)
+    return decorated
+
+# --- Log event helper ---
+def log_event(event_type, user_id, username, details):
+    db = get_db()
+    db.execute('INSERT INTO event_log (event_type, user_id, username, details) VALUES (?, ?, ?, ?)',
+               (event_type, user_id, username, details))
+    db.commit()
+
+# --- Admin dashboard ---
+@app.route('/admin')
+@admin_required
+def admin_dashboard():
+    # Recent events
+    events = query_db('SELECT event_type, username, details, timestamp FROM event_log ORDER BY timestamp DESC LIMIT 50')
+    # User activity
+    users = query_db('SELECT id, username, is_admin FROM users ORDER BY id')
+    # Background job status (mocked for now)
+    celery_status = 'OK (demo)'
+    # Cache stats (mocked for now)
+    cache_stats = {'redis': 'OK' if redis_client else 'Unavailable'}
+    return render_template_string('''
+    <html><head><title>Admin Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    </head><body class="container py-5">
+    <h2>Admin Dashboard</h2>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary mb-3">Back to Dashboard</a>
+    <div class="mb-4">
+        <h4>Recent Events</h4>
+        <table class="table table-bordered table-striped">
+            <thead><tr><th>Type</th><th>User</th><th>Details</th><th>Time</th></tr></thead>
+            <tbody>
+            {% for e in events %}
+            <tr><td>{{ e[0] }}</td><td>{{ e[1] }}</td><td>{{ e[2] }}</td><td>{{ e[3] }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="mb-4">
+        <h4>User Accounts</h4>
+        <table class="table table-bordered table-striped">
+            <thead><tr><th>ID</th><th>Username</th><th>Admin?</th></tr></thead>
+            <tbody>
+            {% for u in users %}
+            <tr><td>{{ u[0] }}</td><td>{{ u[1] }}</td><td>{{ 'Yes' if u[2] else 'No' }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="mb-4">
+        <h4>Background Jobs</h4>
+        <div>Status: <b>{{ celery_status }}</b></div>
+    </div>
+    <div class="mb-4">
+        <h4>Cache</h4>
+        <div>Redis: <b>{{ cache_stats['redis'] }}</b></div>
+    </div>
+    </body></html>
+    ''', events=events, users=users, celery_status=celery_status, cache_stats=cache_stats)
 
 @app.route('/', methods=['GET', 'POST'])
 @login_required
