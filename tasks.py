@@ -2,7 +2,7 @@ from celery import Celery
 import os
 from fetch_volume import fetch_coingecko_trending, fetch_all_volumes, fetch_all_historical, detect_volume_spike
 # Import alert functions and DB helpers from web_dashboard
-from web_dashboard import send_telegram_alert, send_discord_alert, get_db, query_db
+from web_dashboard import send_telegram_alert, send_discord_alert, get_db, query_db, notify_major_alert
 
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
@@ -42,6 +42,8 @@ def send_alerts():
                         # Send Discord alert
                         if discord_webhook:
                             send_discord_alert(discord_webhook, msg)
+                        # Create user notification
+                        notify_major_alert(user_id, symbol, ex, 'volume_spike', msg)
     return "Alerts sent."
 
 # Optionally, add periodic task schedule in Celery config
