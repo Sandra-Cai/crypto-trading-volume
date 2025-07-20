@@ -1307,10 +1307,21 @@ def developer_portal():
     # Recent webhook deliveries
     webhook_events = query_db('SELECT details, timestamp FROM event_log WHERE user_id = ? AND event_type = "webhook_alert" ORDER BY timestamp DESC LIMIT 20', [user_id])
     alert_type_options = ['volume_spike', 'price_spike', 'whale_alert']
+    # Notification badge
+    unread_count = query_db('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read = 0', [user_id], one=True)[0]
     return render_template_string('''
     <html><head><title>Developer Portal</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     </head><body class="container py-5">
+    <div class="d-flex justify-content-end mb-2">
+        <a href="{{ url_for('notifications') }}" class="btn btn-outline-info position-relative me-2">
+            Notifications
+            {% if unread_count > 0 %}
+            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">{{ unread_count }}</span>
+            {% endif %}
+        </a>
+        <a href="{{ url_for('index') }}" class="btn btn-secondary mb-3">Back to Dashboard</a>
+    </div>
     <h2>Developer Portal</h2>
     <a href="{{ url_for('index') }}" class="btn btn-secondary mb-3">Back to Dashboard</a>
     <div class="mb-4 card p-3 shadow-sm">
@@ -1364,7 +1375,7 @@ def developer_portal():
         </table>
     </div>
     </body></html>
-    ''', api_key=api_key, webhook_url=webhook_url, webhook_alert_types=webhook_alert_types, alert_type_options=alert_type_options, api_events=api_events, webhook_events=webhook_events, rate_limit=rate_limit, rate_used=rate_used, rate_reset=rate_reset)
+    ''', api_key=api_key, webhook_url=webhook_url, webhook_alert_types=webhook_alert_types, alert_type_options=alert_type_options, api_events=api_events, webhook_events=webhook_events, rate_limit=rate_limit, rate_used=rate_used, rate_reset=rate_reset, unread_count=unread_count)
 
 @app.route('/api-explorer', methods=['GET', 'POST'])
 @login_required
@@ -1431,6 +1442,8 @@ def api_explorer():
     result = None
     curl_cmd = None
     selected = None
+    user_id = session.get('user_id')
+    unread_count = query_db('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read = 0', [user_id], one=True)[0]
     if request.method == 'POST':
         idx = int(request.form['endpoint_idx'])
         selected = endpoints[idx]
@@ -1459,6 +1472,15 @@ def api_explorer():
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <style>pre { background: #f8f9fa; padding: 1em; border-radius: 4px; }</style>
     </head><body class="container py-5">
+    <div class="d-flex justify-content-end mb-2">
+        <a href="{{ url_for('notifications') }}" class="btn btn-outline-info position-relative me-2">
+            Notifications
+            {% if unread_count > 0 %}
+            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">{{ unread_count }}</span>
+            {% endif %}
+        </a>
+        <a href="{{ url_for('index') }}" class="btn btn-secondary mb-3">Back to Dashboard</a>
+    </div>
     <h2>API Explorer</h2>
     <a href="{{ url_for('index') }}" class="btn btn-secondary mb-3">Back to Dashboard</a>
     <div class="mb-4">
@@ -1506,7 +1528,7 @@ def api_explorer():
     </div>
     {% endif %}
     </body></html>
-    ''', endpoints=endpoints, selected=selected, result=result, curl_cmd=curl_cmd)
+    ''', endpoints=endpoints, selected=selected, result=result, curl_cmd=curl_cmd, unread_count=unread_count)
 
 @app.route('/openapi.json')
 def openapi_spec():
@@ -1794,6 +1816,15 @@ def admin_feedback():
     return render_template_string('''
     ... existing code ...
     ''', msg=msg, feedbacks=feedbacks)
+
+# --- In alert logic, create notification for major alert ---
+def notify_major_alert(user_id, coin, exchange, alert_type, message):
+    create_notification(user_id, f'alert_{alert_type}', f'Alert for {coin} on {exchange}: {message}', link=url_for('index'))
+
+# In send_alerts or send_webhook_alert, call notify_major_alert for each user as appropriate
+# --- In portfolio logic, create notification for significant value change or new coin added ---
+def notify_portfolio_event(user_id, event_type, message):
+    create_notification(user_id, f'portfolio_{event_type}', message, link=url_for('index'))
 
 if __name__ == '__main__':
     init_db() # Initialize database on startup
