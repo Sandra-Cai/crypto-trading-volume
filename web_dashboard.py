@@ -1677,6 +1677,85 @@ def status_page():
 # Add links to /changelog and /status in dashboard, developer portal, and API explorer
 # ... existing code ...
 
+def add_notifications_table():
+    with app.app_context():
+        db = get_db()
+        try:
+            db.execute('''CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                type TEXT,
+                message TEXT,
+                link TEXT,
+                read INTEGER DEFAULT 0,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )''')
+            db.commit()
+        except Exception:
+            pass
+add_notifications_table()
+
+# --- Helper to create a notification ---
+def create_notification(user_id, ntype, message, link=None):
+    db = get_db()
+    db.execute('INSERT INTO notifications (user_id, type, message, link, read) VALUES (?, ?, ?, ?, 0)',
+               (user_id, ntype, message, link))
+    db.commit()
+
+@app.route('/notifications', methods=['GET', 'POST'])
+@login_required
+def notifications():
+    user_id = session.get('user_id')
+    db = get_db()
+    if request.method == 'POST':
+        if 'mark_read' in request.form:
+            db.execute('UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?', (request.form['mark_read'], user_id))
+            db.commit()
+        if 'clear_all' in request.form:
+            db.execute('DELETE FROM notifications WHERE user_id = ?', (user_id,))
+            db.commit()
+    notes = query_db('SELECT id, type, message, link, read, timestamp FROM notifications WHERE user_id = ? ORDER BY timestamp DESC', [user_id])
+    return render_template_string('''
+    <html><head><title>Notifications</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    </head><body class="container py-5">
+    <h2>Notifications</h2>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary mb-3">Back to Dashboard</a>
+    <form method="post" class="mb-3">
+        <button class="btn btn-danger" name="clear_all" value="1" type="submit">Clear All</button>
+    </form>
+    <table class="table table-bordered table-striped">
+        <thead><tr><th>Type</th><th>Message</th><th>Link</th><th>Status</th><th>Time</th><th>Actions</th></tr></thead>
+        <tbody>
+        {% for n in notes %}
+        <tr {% if not n[4] %}class="table-info"{% endif %}>
+            <td>{{ n[1] }}</td>
+            <td>{{ n[2] }}</td>
+            <td>{% if n[3] %}<a href="{{ n[3] }}">View</a>{% endif %}</td>
+            <td>{% if n[4] %}Read{% else %}Unread{% endif %}</td>
+            <td>{{ n[5] }}</td>
+            <td>
+                {% if not n[4] %}
+                <form method="post" style="display:inline-block">
+                    <input type="hidden" name="mark_read" value="{{ n[0] }}">
+                    <button class="btn btn-sm btn-success">Mark Read</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </body></html>
+    ''', notes=notes)
+
+# --- Add notification on admin feedback response ---
+# In admin_feedback, after responding, create_notification for the user
+# --- Add notification for changelog updates (demo: notify all users on /changelog load) ---
+# In changelog(), create_notification for all users if new entry
+# --- Show notification count in dashboard header ---
+# In index(), count unread notifications and pass to template
+
 if __name__ == '__main__':
     init_db() # Initialize database on startup
     app.run(debug=True) 
