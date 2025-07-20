@@ -1826,6 +1826,9 @@ def notify_major_alert(user_id, coin, exchange, alert_type, message):
 def notify_portfolio_event(user_id, event_type, message):
     create_notification(user_id, f'portfolio_{event_type}', message, link=url_for('index'))
 
+# Expose notify_portfolio_event for import
+notify_portfolio_event = notify_portfolio_event
+
 if __name__ == '__main__':
     init_db() # Initialize database on startup
     app.run(debug=True) 
