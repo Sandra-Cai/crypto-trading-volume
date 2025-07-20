@@ -849,6 +849,20 @@ def index():
                     total_volumes[ex] += v * amount
             total_value += value
         portfolio_results = {'total_value': total_value, 'total_volumes': total_volumes, 'details': details}
+        # --- Portfolio event notifications ---
+        prev_portfolio = session.get('last_portfolio', {})
+        prev_value = session.get('last_portfolio_value', 0)
+        new_coins = set([d['coin'] for d in details]) - set(prev_portfolio.keys())
+        for coin in new_coins:
+            notify_portfolio_event(user_id, 'new_coin', f'New coin added to your portfolio: {coin}')
+        if prev_value > 0:
+            change = abs(total_value - prev_value) / prev_value
+            if change > 0.1:
+                direction = 'increased' if total_value > prev_value else 'decreased'
+                notify_portfolio_event(user_id, 'value_change', f'Portfolio value {direction} by {change*100:.1f}% to ${total_value:,.2f}')
+        # Store new portfolio state
+        session['last_portfolio'] = {d['coin']: d['amount'] for d in details}
+        session['last_portfolio_value'] = total_value
     
     # Trading bot state
     session_id = session.get('user_id', 'default')
