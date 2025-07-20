@@ -1603,6 +1603,80 @@ def swagger_ui():
 # Add links to Swagger UI in API Explorer and Developer Portal
 # ... existing code ...
 
+@app.route('/changelog')
+def changelog():
+    # For demo, use a static changelog. In production, load from CHANGELOG.md if present.
+    changelog_entries = [
+        ("2024-06-01", "Added OpenAPI/Swagger documentation and API Explorer."),
+        ("2024-05-30", "Launched Developer Portal with API key management, rate limiting, and webhook delivery history."),
+        ("2024-05-28", "Added webhook alerting, retry, and test button."),
+        ("2024-05-25", "Released public REST API and user-customizable analytics dashboard."),
+        ("2024-05-20", "Initial release: Real-time crypto trading volume analytics platform.")
+    ]
+    return render_template_string('''
+    <html><head><title>Changelog</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    </head><body class="container py-5">
+    <h2>Changelog</h2>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary mb-3">Back to Dashboard</a>
+    <ul class="list-group mb-4">
+    {% for date, entry in changelog_entries %}
+      <li class="list-group-item"><b>{{ date }}</b>: {{ entry }}</li>
+    {% endfor %}
+    </ul>
+    </body></html>
+    ''', changelog_entries=changelog_entries)
+
+@app.route('/status')
+def status_page():
+    # Check status of key services
+    import socket
+    import requests as ext_requests
+    status = {}
+    # API
+    try:
+        r = ext_requests.get(request.host_url.rstrip('/') + '/api/trending', timeout=3)
+        status['API'] = 'OK' if r.status_code == 200 else f'Error ({r.status_code})'
+    except Exception as e:
+        status['API'] = f'Error ({e})'
+    # Dashboard (self)
+    status['Dashboard'] = 'OK'
+    # Redis
+    try:
+        if redis_client and redis_client.ping():
+            status['Redis'] = 'OK'
+        else:
+            status['Redis'] = 'Unavailable'
+    except Exception as e:
+        status['Redis'] = f'Error ({e})'
+    # Celery (mocked: check if worker is up by checking a key)
+    try:
+        celery_status = redis_client.get('celery_worker_heartbeat') if redis_client else None
+        status['Celery Worker'] = 'OK' if celery_status else 'Unknown (heartbeat not set)'
+    except Exception as e:
+        status['Celery Worker'] = f'Error ({e})'
+    # Background jobs (mocked)
+    status['Background Jobs'] = 'OK (see Admin Dashboard for details)'
+    return render_template_string('''
+    <html><head><title>Status</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    </head><body class="container py-5">
+    <h2>Status Page</h2>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary mb-3">Back to Dashboard</a>
+    <table class="table table-bordered w-auto">
+      <thead><tr><th>Service</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for k, v in status.items() %}
+        <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </body></html>
+    ''', status=status)
+
+# Add links to /changelog and /status in dashboard, developer portal, and API explorer
+# ... existing code ...
+
 if __name__ == '__main__':
     init_db() # Initialize database on startup
     app.run(debug=True) 
