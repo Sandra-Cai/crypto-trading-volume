@@ -891,6 +891,12 @@ def index():
         except Exception:
             pass
 
+    # Notification badge
+    user_id = session.get('user_id')
+    unread_count = 0
+    if user_id:
+        unread_count = query_db('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read = 0', [user_id], one=True)[0]
+
     return render_template_string('''
     <html>
     <head>
@@ -900,16 +906,14 @@ def index():
         <title>Crypto Trading Volume Dashboard</title>
     </head>
     <body class="container py-3">
-        <form method="post" action="/setlang" class="mb-3">
-            <label for="lang">{{ t('select_language') }}:</label>
-            <select name="lang" class="form-select d-inline w-auto">
-                <option value="en" {% if lang == 'en' %}selected{% endif %}>{{ t('english') }}</option>
-                <option value="es" {% if lang == 'es' %}selected{% endif %}>{{ t('spanish') }}</option>
-            </select>
-            <button class="btn btn-secondary btn-sm" type="submit">{{ t('update') }}</button>
-        </form>
         <div class="d-flex justify-content-end mb-2">
-            <a href="{{ url_for('customize_dashboard') }}" class="btn btn-outline-primary me-2">{{ t('customize_dashboard') }}</a>
+            <a href="{{ url_for('notifications') }}" class="btn btn-outline-info position-relative me-2">
+                Notifications
+                {% if unread_count > 0 %}
+                <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">{{ unread_count }}</span>
+                {% endif %}
+            </a>
+            <a href="{{ url_for('customize_dashboard') }}" class="btn btn-outline-primary me-2">Customize Dashboard</a>
             <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary">{{ t('logout') }}</a>
         </div>
         <h1 class="mb-4">{{ t('crypto_trading_volume_dashboard') }}</h1>
@@ -1197,7 +1201,7 @@ def index():
         {% endif %}
     </body>
     </html>
-    ''', t=t, lang=lang, coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days, user_favorites=user_favorites, news_with_sentiment=news_with_sentiment, whale_alerts=whale_alerts, onchain_stats=onchain_stats, failed_exchanges=failed_exchanges, widget_prefs=widget_prefs)
+    ''', t=t, lang=lang, coins=coins, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, plot_div=plot_div, trend_div=trend_div, price=price, alert_msgs=alert_msgs, request=request, portfolio_results=portfolio_results, spike_alerts=spike_alerts, correlation_results=correlation_results, detect_spikes=detect_spikes, show_correlation=show_correlation, live=live, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days, user_favorites=user_favorites, news_with_sentiment=news_with_sentiment, whale_alerts=whale_alerts, onchain_stats=onchain_stats, failed_exchanges=failed_exchanges, widget_prefs=widget_prefs, unread_count=unread_count)
 
 # --- Public API endpoints ---
 @app.route('/api/trending')
@@ -1613,6 +1617,11 @@ def changelog():
         ("2024-05-25", "Released public REST API and user-customizable analytics dashboard."),
         ("2024-05-20", "Initial release: Real-time crypto trading volume analytics platform.")
     ]
+    # Demo: always notify all users of the latest entry
+    db = get_db()
+    users = query_db('SELECT id FROM users')
+    for u in users:
+        create_notification(u[0], 'changelog', f'Platform update: {changelog_entries[0][1]}', link=url_for('changelog'))
     return render_template_string('''
     <html><head><title>Changelog</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
@@ -1755,6 +1764,36 @@ def notifications():
 # In changelog(), create_notification for all users if new entry
 # --- Show notification count in dashboard header ---
 # In index(), count unread notifications and pass to template
+
+@app.route('/admin/feedback', methods=['GET', 'POST'])
+@admin_required
+def admin_feedback():
+    db = get_db()
+    msg = None
+    if request.method == 'POST':
+        fid = request.form.get('fid')
+        response = request.form.get('response', '').strip()
+        action = request.form.get('action')
+        if action == 'respond' and fid and response:
+            db.execute('UPDATE feedback SET response = ?, status = ? WHERE id = ?', (response, 'resolved', fid))
+            db.commit()
+            # Notify user
+            row = query_db('SELECT user_id FROM feedback WHERE id = ?', [fid], one=True)
+            if row:
+                create_notification(row[0], 'feedback_response', f'Admin responded to your feedback: {response}', link=url_for('feedback'))
+            msg = ('success', 'Response sent and marked as resolved.')
+        elif action == 'resolve' and fid:
+            db.execute('UPDATE feedback SET status = ? WHERE id = ?', ('resolved', fid))
+            db.commit()
+            # Notify user
+            row = query_db('SELECT user_id FROM feedback WHERE id = ?', [fid], one=True)
+            if row:
+                create_notification(row[0], 'feedback_resolved', 'Your feedback was marked as resolved.', link=url_for('feedback'))
+            msg = ('success', 'Marked as resolved.')
+    feedbacks = query_db('SELECT id, username, type, message, status, response, timestamp FROM feedback ORDER BY timestamp DESC LIMIT 50')
+    return render_template_string('''
+    ... existing code ...
+    ''', msg=msg, feedbacks=feedbacks)
 
 if __name__ == '__main__':
     init_db() # Initialize database on startup
