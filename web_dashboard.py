@@ -362,15 +362,17 @@ def settings():
             discord_webhook = request.form.get('discord_webhook', '')
             webhook_url = request.form.get('webhook_url', '')
             webhook_alert_types = ','.join(request.form.getlist('webhook_alert_types'))
-            db.execute('UPDATE users SET telegram_id = ?, discord_webhook = ?, webhook_url = ?, webhook_alert_types = ? WHERE id = ?',
-                       (telegram_id, discord_webhook, webhook_url, webhook_alert_types, user_id))
+            email = request.form.get('email', '')
+            db.execute('UPDATE users SET telegram_id = ?, discord_webhook = ?, webhook_url = ?, webhook_alert_types = ?, email = ? WHERE id = ?',
+                       (telegram_id, discord_webhook, webhook_url, webhook_alert_types, email, user_id))
             db.commit()
             return redirect(url_for('settings'))
-    row = query_db('SELECT telegram_id, discord_webhook, webhook_url, webhook_alert_types FROM users WHERE id = ?', [user_id], one=True)
+    row = query_db('SELECT telegram_id, discord_webhook, webhook_url, webhook_alert_types, email FROM users WHERE id = ?', [user_id], one=True)
     telegram_id = row[0] if row else ''
     discord_webhook = row[1] if row else ''
     webhook_url = row[2] if row and len(row) > 2 else ''
     webhook_alert_types = row[3].split(',') if row and row[3] else []
+    email = row[4] if row and len(row) > 4 else ''
     alert_type_options = ['volume_spike', 'price_spike', 'whale_alert']
     return render_template_string('''
     <html><head><title>Alert Settings</title>
@@ -381,6 +383,7 @@ def settings():
     <div class="alert alert-{{ test_result[0] }}">{{ test_result[1] }}</div>
     {% endif %}
     <form method="post" class="w-100 w-md-50 mx-auto">
+        <div class="mb-3"><label class="form-label">Email:</label><input class="form-control" type="email" name="email" value="{{ email }}"></div>
         <div class="mb-3"><label class="form-label">Telegram Chat ID:</label><input class="form-control" type="text" name="telegram_id" value="{{ telegram_id }}"></div>
         <div class="mb-3"><label class="form-label">Discord Webhook URL:</label><input class="form-control" type="text" name="discord_webhook" value="{{ discord_webhook }}"></div>
         <div class="mb-3"><label class="form-label">Webhook URL:</label><input class="form-control" type="text" name="webhook_url" value="{{ webhook_url }}"></div>
@@ -397,7 +400,7 @@ def settings():
     </form>
     <div class="mt-3"><a href="{{ url_for('index') }}">Back to Dashboard</a></div>
     </body></html>
-    ''', telegram_id=telegram_id, discord_webhook=discord_webhook, webhook_url=webhook_url, webhook_alert_types=webhook_alert_types, alert_type_options=alert_type_options, test_result=test_result)
+    ''', telegram_id=telegram_id, discord_webhook=discord_webhook, webhook_url=webhook_url, webhook_alert_types=webhook_alert_types, alert_type_options=alert_type_options, test_result=test_result, email=email)
 
 # --- Enhanced Whale Alerts (mocked, with Redis cache) ---
 def fetch_whale_alerts(coin):
@@ -910,6 +913,24 @@ def index():
     unread_count = 0
     if user_id:
         unread_count = query_db('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read = 0', [user_id], one=True)[0]
+
+    # Whale alert notifications
+    user_favorites = []
+    row = query_db('SELECT favorites, email FROM users WHERE id = ?', [user_id], one=True)
+    if row and row[0]:
+        user_favorites = row[0].split(',') if row[0] else []
+        email = row[1]
+        for coin in user_favorites:
+            whale_alerts = fetch_whale_alerts(coin)
+            last_whale_alerts = session.get(f'last_whale_{coin}', set())
+            for alert in whale_alerts:
+                alert_id = alert.get('txid')
+                if alert_id and alert_id not in last_whale_alerts:
+                    msg = f'Whale alert: {alert["amount"]} {coin.upper()} from {alert["from"]} to {alert["to"]} at {alert["timestamp"]}'
+                    notify_major_alert(user_id, coin, 'whale', 'whale_alert', msg)
+                    if email:
+                        send_email_notification(email, f'Whale Alert for {coin.upper()}', msg)
+            session[f'last_whale_{coin}'] = set([a.get('txid') for a in whale_alerts if a.get('txid')])
 
     return render_template_string('''
     <html>
@@ -1842,6 +1863,21 @@ def notify_portfolio_event(user_id, event_type, message):
 
 # Expose notify_portfolio_event for import
 notify_portfolio_event = notify_portfolio_event
+
+def add_email_column():
+    with app.app_context():
+        db = get_db()
+        try:
+            db.execute('ALTER TABLE users ADD COLUMN email TEXT')
+            db.commit()
+        except Exception:
+            pass
+add_email_column()
+
+# --- Email notification helper (placeholder) ---
+def send_email_notification(email, subject, message):
+    # TODO: Integrate with SMTP or email service
+    print(f"[EMAIL] To: {email} | Subject: {subject} | Message: {message}")
 
 if __name__ == '__main__':
     init_db() # Initialize database on startup
