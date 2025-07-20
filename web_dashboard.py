@@ -1504,6 +1504,105 @@ def api_explorer():
     </body></html>
     ''', endpoints=endpoints, selected=selected, result=result, curl_cmd=curl_cmd)
 
+@app.route('/openapi.json')
+def openapi_spec():
+    spec = {
+        "openapi": "3.0.0",
+        "info": {
+            "title": "Crypto Trading Volume API",
+            "version": "1.0.0",
+            "description": "OpenAPI spec for all public API endpoints."
+        },
+        "servers": [{"url": request.host_url.rstrip('/')}],
+        "paths": {
+            "/api/trending": {
+                "get": {
+                    "summary": "Get trending coins",
+                    "responses": {"200": {"description": "Trending coins", "content": {"application/json": {}}}}
+                }
+            },
+            "/api/volumes/{coin}": {
+                "get": {
+                    "summary": "Get 24h trading volumes for a coin",
+                    "parameters": [{"name": "coin", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "responses": {"200": {"description": "Volumes", "content": {"application/json": {}}}}
+                }
+            },
+            "/api/historical/{coin}": {
+                "get": {
+                    "summary": "Get historical volume data for a coin",
+                    "parameters": [{"name": "coin", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "responses": {"200": {"description": "Historical data", "content": {"application/json": {}}}}
+                }
+            },
+            "/api/market_data/{coin}": {
+                "get": {
+                    "summary": "Get market data for a coin",
+                    "parameters": [{"name": "coin", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "responses": {"200": {"description": "Market data", "content": {"application/json": {}}}}
+                }
+            },
+            "/api/onchain/{coin}": {
+                "get": {
+                    "summary": "Get on-chain stats for a coin",
+                    "parameters": [{"name": "coin", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "responses": {"200": {"description": "On-chain stats", "content": {"application/json": {}}}}
+                }
+            },
+            "/api/whale_alerts/{coin}": {
+                "get": {
+                    "summary": "Get recent whale transactions for a coin",
+                    "parameters": [{"name": "coin", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "responses": {"200": {"description": "Whale alerts", "content": {"application/json": {}}}}
+                }
+            },
+            "/api/portfolio": {
+                "get": {
+                    "summary": "Get user portfolio (favorites)",
+                    "security": [{"ApiKeyAuth": []}],
+                    "responses": {"200": {"description": "Portfolio", "content": {"application/json": {}}},
+                                   "401": {"description": "API key required"},
+                                   "403": {"description": "Invalid or revoked API key"}}
+                }
+            }
+        },
+        "components": {
+            "securitySchemes": {
+                "ApiKeyAuth": {
+                    "type": "apiKey",
+                    "in": "header",
+                    "name": "X-API-KEY"
+                }
+            }
+        }
+    }
+    from flask import jsonify
+    return jsonify(spec)
+
+@app.route('/swagger')
+def swagger_ui():
+    return render_template_string('''
+    <html><head><title>Swagger UI</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+    </head><body>
+    <div id="swagger-ui"></div>
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+    window.onload = function() {
+      window.ui = SwaggerUIBundle({
+        url: '/openapi.json',
+        dom_id: '#swagger-ui',
+        presets: [SwaggerUIBundle.presets.apis],
+        layout: "BaseLayout"
+      });
+    };
+    </script>
+    </body></html>
+    ''')
+
+# Add links to Swagger UI in API Explorer and Developer Portal
+# ... existing code ...
+
 if __name__ == '__main__':
     init_db() # Initialize database on startup
     app.run(debug=True) 
