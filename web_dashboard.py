@@ -15,6 +15,7 @@ import json
 from werkzeug.security import generate_password_hash
 from datetime import datetime
 import secrets
+import requests as ext_requests
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Change this in production
@@ -1360,6 +1361,148 @@ def developer_portal():
     </div>
     </body></html>
     ''', api_key=api_key, webhook_url=webhook_url, webhook_alert_types=webhook_alert_types, alert_type_options=alert_type_options, api_events=api_events, webhook_events=webhook_events, rate_limit=rate_limit, rate_used=rate_used, rate_reset=rate_reset)
+
+@app.route('/api-explorer', methods=['GET', 'POST'])
+@login_required
+def api_explorer():
+    api_base = request.host_url.rstrip('/')
+    endpoints = [
+        {
+            'name': 'Trending Coins',
+            'path': '/api/trending',
+            'method': 'GET',
+            'params': [],
+            'auth': False,
+            'desc': 'Get trending coins (from CoinGecko)'
+        },
+        {
+            'name': 'Volumes',
+            'path': '/api/volumes/<coin>',
+            'method': 'GET',
+            'params': ['coin'],
+            'auth': False,
+            'desc': 'Get 24h trading volumes for a coin across all exchanges'
+        },
+        {
+            'name': 'Historical',
+            'path': '/api/historical/<coin>',
+            'method': 'GET',
+            'params': ['coin'],
+            'auth': False,
+            'desc': 'Get historical volume data for a coin'
+        },
+        {
+            'name': 'Market Data',
+            'path': '/api/market_data/<coin>',
+            'method': 'GET',
+            'params': ['coin'],
+            'auth': False,
+            'desc': 'Get market data for a coin (market cap, price change, etc.)'
+        },
+        {
+            'name': 'On-chain Stats',
+            'path': '/api/onchain/<coin>',
+            'method': 'GET',
+            'params': ['coin'],
+            'auth': False,
+            'desc': 'Get on-chain stats for a coin'
+        },
+        {
+            'name': 'Whale Alerts',
+            'path': '/api/whale_alerts/<coin>',
+            'method': 'GET',
+            'params': ['coin'],
+            'auth': False,
+            'desc': 'Get recent whale transactions for a coin'
+        },
+        {
+            'name': 'Portfolio',
+            'path': '/api/portfolio',
+            'method': 'GET',
+            'params': [],
+            'auth': True,
+            'desc': 'Get user portfolio (favorites); requires API key'
+        },
+    ]
+    result = None
+    curl_cmd = None
+    selected = None
+    if request.method == 'POST':
+        idx = int(request.form['endpoint_idx'])
+        selected = endpoints[idx]
+        url = api_base + selected['path']
+        # Replace path params
+        for p in selected['params']:
+            val = request.form.get(p, '')
+            url = url.replace(f'<{p}>', val)
+        headers = {}
+        if selected['auth']:
+            api_key = request.form.get('api_key', '')
+            if api_key:
+                headers['X-API-KEY'] = api_key
+        try:
+            resp = ext_requests.get(url, headers=headers, timeout=10)
+            result = resp.text
+        except Exception as e:
+            result = f'Error: {e}'
+        # Build curl command
+        curl_cmd = f"curl -X GET '{url}'"
+        if headers:
+            for k, v in headers.items():
+                curl_cmd += f" -H '{k}: {v}'"
+    return render_template_string('''
+    <html><head><title>API Explorer</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>pre { background: #f8f9fa; padding: 1em; border-radius: 4px; }</style>
+    </head><body class="container py-5">
+    <h2>API Explorer</h2>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary mb-3">Back to Dashboard</a>
+    <div class="mb-4">
+        <form method="post">
+            <div class="mb-3">
+                <label for="endpoint_idx" class="form-label">Select Endpoint:</label>
+                <select class="form-select" name="endpoint_idx" id="endpoint_idx" onchange="this.form.submit()">
+                    <option value="" disabled selected>Choose an endpoint...</option>
+                    {% for i, ep in enumerate(endpoints) %}
+                    <option value="{{ i }}" {% if selected and endpoints[i]['name'] == selected['name'] %}selected{% endif %}>{{ ep['name'] }} - {{ ep['desc'] }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% if selected %}
+            <div class="mb-3">
+                <label class="form-label">Endpoint: <code>{{ selected['path'] }}</code></label><br>
+                <small>{{ selected['desc'] }}</small>
+            </div>
+            {% for p in selected['params'] %}
+            <div class="mb-3">
+                <label class="form-label">{{ p|capitalize }}:</label>
+                <input class="form-control" type="text" name="{{ p }}" required>
+            </div>
+            {% endfor %}
+            {% if selected['auth'] %}
+            <div class="mb-3">
+                <label class="form-label">API Key:</label>
+                <input class="form-control" type="text" name="api_key" required>
+            </div>
+            {% endif %}
+            <button class="btn btn-primary" type="submit">Try It!</button>
+            {% endif %}
+        </form>
+    </div>
+    {% if curl_cmd %}
+    <div class="mb-3">
+        <b>cURL Command:</b>
+        <pre>{{ curl_cmd }}</pre>
+    </div>
+    {% endif %}
+    {% if result %}
+    <div class="mb-3">
+        <b>Response:</b>
+        <pre>{{ result }}</pre>
+    </div>
+    {% endif %}
+    </body></html>
+    ''', endpoints=endpoints, selected=selected, result=result, curl_cmd=curl_cmd)
 
 if __name__ == '__main__':
     init_db() # Initialize database on startup
