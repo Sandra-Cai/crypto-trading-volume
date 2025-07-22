@@ -373,7 +373,7 @@ def settings():
     webhook_url = row[2] if row and len(row) > 2 else ''
     webhook_alert_types = row[3].split(',') if row and row[3] else []
     email = row[4] if row and len(row) > 4 else ''
-    alert_type_options = ['volume_spike', 'price_spike', 'whale_alert', 'technical', 'arbitrage', 'news']
+    alert_type_options = ['volume_spike', 'price_spike', 'whale_alert', 'technical', 'arbitrage', 'news', 'daily_summary']
     return render_template_string('''
     <html><head><title>Alert Settings</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
@@ -1389,7 +1389,7 @@ def developer_portal():
     api_events = query_db('SELECT event_type, details, timestamp FROM event_log WHERE user_id = ? AND event_type LIKE "api_%" ORDER BY timestamp DESC LIMIT 20', [user_id])
     # Recent webhook deliveries
     webhook_events = query_db('SELECT details, timestamp FROM event_log WHERE user_id = ? AND event_type = "webhook_alert" ORDER BY timestamp DESC LIMIT 20', [user_id])
-    alert_type_options = ['volume_spike', 'price_spike', 'whale_alert', 'technical', 'arbitrage', 'news']
+    alert_type_options = ['volume_spike', 'price_spike', 'whale_alert', 'technical', 'arbitrage', 'news', 'daily_summary']
     # Notification badge
     unread_count = query_db('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read = 0', [user_id], one=True)[0]
     return render_template_string('''
@@ -1926,6 +1926,36 @@ add_email_column()
 def send_email_notification(email, subject, message):
     # TODO: Integrate with SMTP or email service
     print(f"[EMAIL] To: {email} | Subject: {subject} | Message: {message}")
+
+def generate_daily_summary(user_id, email, user_favorites):
+    # Gather summary data for user's favorite coins
+    lines = []
+    for coin in user_favorites:
+        price = fetch_market_data(coin).get('price')
+        volume = fetch_market_data(coin).get('volume')
+        whale_alerts = fetch_whale_alerts(coin)
+        sentiment = fetch_social_sentiment(coin)
+        lines.append(f"{coin.upper()}: Price ${price}, 24h Vol {volume}, Whale txs: {len(whale_alerts)}, Sentiment: {sentiment.get('score') if sentiment else 'N/A'}")
+    summary = '\n'.join(lines)
+    notify_major_alert(user_id, None, 'summary', 'daily_summary', f"Daily summary for your portfolio:\n{summary}")
+    if email:
+        send_email_notification(email, "Your Daily Crypto Summary", summary)
+
+# --- Manual endpoint to trigger daily summary for all users (for demo/testing) ---
+@app.route('/admin/send_daily_summaries')
+@admin_required
+def send_daily_summaries():
+    users = query_db('SELECT id, favorites, email, webhook_alert_types FROM users')
+    count = 0
+    for user_id, favorites, email, alert_types in users:
+        if not alert_types or 'daily_summary' not in alert_types.split(','):
+            continue
+        user_favorites = favorites.split(',') if favorites else []
+        if not user_favorites:
+            continue
+        generate_daily_summary(user_id, email, user_favorites)
+        count += 1
+    return f"Sent daily summaries to {count} users."
 
 if __name__ == '__main__':
     init_db() # Initialize database on startup
