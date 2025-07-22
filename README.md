@@ -316,3 +316,24 @@ All endpoints return JSON. Example:
 
 ### Rate Limits
 - Please respect fair use. For high-volume or commercial use, contact the maintainers.
+
+## Email Alerts Setup
+
+To enable real email delivery for alerts and summaries, set the following environment variables:
+
+- `SMTP_HOST` — SMTP server hostname (e.g., smtp.gmail.com)
+- `SMTP_PORT` — SMTP server port (usually 587)
+- `SMTP_USER` — SMTP username (your email address or SMTP user)
+- `SMTP_PASSWORD` — SMTP password or app password
+- `SMTP_FROM` — (optional) From address for emails (defaults to SMTP_USER)
+
+Example (in your shell or Docker Compose):
+```sh
+export SMTP_HOST=smtp.gmail.com
+export SMTP_PORT=587
+export SMTP_USER=your@email.com
+export SMTP_PASSWORD=yourpassword
+export SMTP_FROM=alerts@yourdomain.com
+```
+
+If these are not set, emails will not be sent (but will be logged to the console for testing).

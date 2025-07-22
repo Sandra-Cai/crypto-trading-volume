@@ -17,6 +17,8 @@ from datetime import datetime
 import secrets
 import requests as ext_requests
 from pywebpush import webpush, WebPushException
+import smtplib
+from email.mime.text import MIMEText
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Change this in production
@@ -1954,10 +1956,30 @@ def add_email_column():
             pass
 add_email_column()
 
-# --- Email notification helper (placeholder) ---
+# --- Email notification helper (real SMTP) ---
+# Required environment variables:
+#   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM
 def send_email_notification(email, subject, message):
-    # TODO: Integrate with SMTP or email service
-    print(f"[EMAIL] To: {email} | Subject: {subject} | Message: {message}")
+    smtp_host = os.environ.get('SMTP_HOST')
+    smtp_port = int(os.environ.get('SMTP_PORT', '587'))
+    smtp_user = os.environ.get('SMTP_USER')
+    smtp_password = os.environ.get('SMTP_PASSWORD')
+    smtp_from = os.environ.get('SMTP_FROM', smtp_user)
+    if not (smtp_host and smtp_port and smtp_user and smtp_password and smtp_from):
+        print(f"[EMAIL] Missing SMTP config, not sending real email. To: {email} | Subject: {subject} | Message: {message}")
+        return
+    try:
+        msg = MIMEText(message)
+        msg['Subject'] = subject
+        msg['From'] = smtp_from
+        msg['To'] = email
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_from, [email], msg.as_string())
+        print(f"[EMAIL] Sent to {email} | Subject: {subject}")
+    except Exception as e:
+        print(f"[EMAIL] Failed to send to {email}: {e}")
 
 def generate_daily_summary(user_id, email, user_favorites):
     # Gather summary data for user's favorite coins
