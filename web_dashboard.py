@@ -935,10 +935,10 @@ def index():
     # Load user dashboard widget preferences
     user_id = session.get('user_id')
     row = query_db('SELECT dashboard_prefs FROM users WHERE id = ?', [user_id], one=True)
-    widget_prefs = {'show_onchain': True, 'show_whale': True, 'show_trend': True, 'show_correlation': True, 'show_news': True}
+    widget_prefs = ['market_share', 'top_gainers', 'correlation', 'volatility'] # Default to all
     if row and row[0]:
         try:
-            widget_prefs.update(json.loads(row[0]))
+            widget_prefs = row[0].split(',')
         except Exception:
             pass
 
@@ -961,7 +961,7 @@ def index():
                 alert_id = alert.get('txid')
                 if alert_id and alert_id not in last_whale_alerts:
                     msg = f'Whale alert: {alert["amount"]} {coin.upper()} from {alert["from"]} to {alert["to"]} at {alert["timestamp"]}'
-                    notify_major_alert(user_id, coin, 'whale', 'whale_alert', msg)
+                    notify_major_alert_with_push(user_id, coin, 'whale', 'whale_alert', msg)
                     if email:
                         send_email_notification(email, f'Whale Alert for {coin.upper()}', msg)
             session[f'last_whale_{coin}'] = set([a.get('txid') for a in whale_alerts if a.get('txid')])
@@ -974,22 +974,22 @@ def index():
             macd, signal, hist_macd = calculate_macd(fetch_historical_prices(coin))
             if rsi and rsi > 70:
                 msg = f'RSI for {coin.upper()} is overbought ({rsi:.1f})'
-                notify_major_alert(user_id, coin, 'technical', 'rsi_overbought', msg)
+                notify_major_alert_with_push(user_id, coin, 'technical', 'rsi_overbought', msg)
                 if email:
                     send_email_notification(email, f'Technical Alert for {coin.upper()}', msg)
             if rsi and rsi < 30:
                 msg = f'RSI for {coin.upper()} is oversold ({rsi:.1f})'
-                notify_major_alert(user_id, coin, 'technical', 'rsi_oversold', msg)
+                notify_major_alert_with_push(user_id, coin, 'technical', 'rsi_oversold', msg)
                 if email:
                     send_email_notification(email, f'Technical Alert for {coin.upper()}', msg)
             if macd and signal and macd > signal:
                 msg = f'MACD bullish crossover detected for {coin.upper()} (MACD: {macd:.2f}, Signal: {signal:.2f})'
-                notify_major_alert(user_id, coin, 'technical', 'macd_bullish', msg)
+                notify_major_alert_with_push(user_id, coin, 'technical', 'macd_bullish', msg)
                 if email:
                     send_email_notification(email, f'Technical Alert for {coin.upper()}', msg)
             if macd and signal and macd < signal:
                 msg = f'MACD bearish crossover detected for {coin.upper()} (MACD: {macd:.2f}, Signal: {signal:.2f})'
-                notify_major_alert(user_id, coin, 'technical', 'macd_bearish', msg)
+                notify_major_alert_with_push(user_id, coin, 'technical', 'macd_bearish', msg)
                 if email:
                     send_email_notification(email, f'Technical Alert for {coin.upper()}', msg)
 
@@ -999,7 +999,7 @@ def index():
             arb = detect_arbitrage_opportunities(coin)
             if arb:
                 msg = f'Arbitrage opportunity for {coin.upper()}: Buy on {arb["buy_exchange"]} at {arb["buy_price"]}, sell on {arb["sell_exchange"]} at {arb["sell_price"]} (spread: {arb["spread"]:.2f}%)'
-                notify_major_alert(user_id, coin, 'arbitrage', 'arbitrage_opportunity', msg)
+                notify_major_alert_with_push(user_id, coin, 'arbitrage', 'arbitrage_opportunity', msg)
                 if email:
                     send_email_notification(email, f'Arbitrage Alert for {coin.upper()}', msg)
 
@@ -1010,7 +1010,7 @@ def index():
             if sentiment and abs(sentiment['change']) > 0.5:
                 direction = 'positive' if sentiment['change'] > 0 else 'negative'
                 msg = f'News sentiment spike for {coin.upper()}: {direction} ({sentiment["score"]:.2f}, change: {sentiment["change"]:+.2f})'
-                notify_major_alert(user_id, coin, 'news', f'news_sentiment_{direction}', msg)
+                notify_major_alert_with_push(user_id, coin, 'news', f'news_sentiment_{direction}', msg)
                 if email:
                     send_email_notification(email, f'News Sentiment Alert for {coin.upper()}', msg)
 
@@ -1019,235 +1019,272 @@ def index():
         with app.app_context():
             db = get_db()
             try:
-            db.execute('''CREATE TABLE IF NOT EXISTS notifications (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                type TEXT,
-                message TEXT,
-                link TEXT,
-                read INTEGER DEFAULT 0,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )''')
-            db.commit()
-        except Exception:
-            pass
-add_notifications_table()
+                db.execute('''CREATE TABLE IF NOT EXISTS notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    type TEXT,
+                    message TEXT,
+                    link TEXT,
+                    read INTEGER DEFAULT 0,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )''')
+                db.commit()
+            except Exception:
+                pass
+    add_notifications_table()
 
-# --- Helper to create a notification ---
-def create_notification(user_id, ntype, message, link=None):
-    db = get_db()
-    db.execute('INSERT INTO notifications (user_id, type, message, link, read) VALUES (?, ?, ?, ?, 0)',
-               (user_id, ntype, message, link))
-    db.commit()
-
-@app.route('/notifications', methods=['GET', 'POST'])
-@login_required
-def notifications():
-    user_id = session.get('user_id')
-    db = get_db()
-    if request.method == 'POST':
-        if 'mark_read' in request.form:
-            db.execute('UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?', (request.form['mark_read'], user_id))
-            db.commit()
-        if 'clear_all' in request.form:
-            db.execute('DELETE FROM notifications WHERE user_id = ?', (user_id,))
-            db.commit()
-    notes = query_db('SELECT id, type, message, link, read, timestamp FROM notifications WHERE user_id = ? ORDER BY timestamp DESC', [user_id])
-    return render_template_string('''
-    <html><head><title>Notifications</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
-    </head><body class="container py-5">
-    <h2>Notifications</h2>
-    <a href="{{ url_for('index') }}" class="btn btn-secondary mb-3">Back to Dashboard</a>
-    <form method="post" class="mb-3">
-        <button class="btn btn-danger" name="clear_all" value="1" type="submit">Clear All</button>
-    </form>
-    <table class="table table-bordered table-striped">
-        <thead><tr><th>Type</th><th>Message</th><th>Link</th><th>Status</th><th>Time</th><th>Actions</th></tr></thead>
-        <tbody>
-        {% for n in notes %}
-        <tr {% if not n[4] %}class="table-info"{% endif %}>
-            <td>{{ n[1] }}</td>
-            <td>{{ n[2] }}</td>
-            <td>{% if n[3] %}<a href="{{ n[3] }}">View</a>{% endif %}</td>
-            <td>{% if n[4] %}Read{% else %}Unread{% endif %}</td>
-            <td>{{ n[5] }}</td>
-            <td>
-                {% if not n[4] %}
-                <form method="post" style="display:inline-block">
-                    <input type="hidden" name="mark_read" value="{{ n[0] }}">
-                    <button class="btn btn-sm btn-success">Mark Read</button>
-                </form>
-                {% endif %}
-            </td>
-        </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    </body></html>
-    ''', notes=notes)
-
-# --- Add notification on admin feedback response ---
-# In admin_feedback, after responding, create_notification for the user
-# --- Add notification for changelog updates (demo: notify all users on /changelog load) ---
-# In changelog(), create_notification for all users if new entry
-# --- Show notification count in dashboard header ---
-# In index(), count unread notifications and pass to template
-
-@app.route('/admin/feedback', methods=['GET', 'POST'])
-@admin_required
-def admin_feedback():
-    db = get_db()
-    msg = None
-    if request.method == 'POST':
-        fid = request.form.get('fid')
-        response = request.form.get('response', '').strip()
-        action = request.form.get('action')
-        if action == 'respond' and fid and response:
-            db.execute('UPDATE feedback SET response = ?, status = ? WHERE id = ?', (response, 'resolved', fid))
-            db.commit()
-            # Notify user
-            row = query_db('SELECT user_id FROM feedback WHERE id = ?', [fid], one=True)
-            if row:
-                create_notification(row[0], 'feedback_response', f'Admin responded to your feedback: {response}', link=url_for('feedback'))
-            msg = ('success', 'Response sent and marked as resolved.')
-        elif action == 'resolve' and fid:
-            db.execute('UPDATE feedback SET status = ? WHERE id = ?', ('resolved', fid))
-            db.commit()
-            # Notify user
-            row = query_db('SELECT user_id FROM feedback WHERE id = ?', [fid], one=True)
-            if row:
-                create_notification(row[0], 'feedback_resolved', 'Your feedback was marked as resolved.', link=url_for('feedback'))
-            msg = ('success', 'Marked as resolved.')
-    feedbacks = query_db('SELECT id, username, type, message, status, response, timestamp FROM feedback ORDER BY timestamp DESC LIMIT 50')
-    return render_template_string('''
-    ... existing code ...
-    ''', msg=msg, feedbacks=feedbacks)
-
-# --- In alert logic, create notification for major alert ---
-def notify_major_alert(user_id, coin, exchange, alert_type, message):
-    create_notification(user_id, f'alert_{alert_type}', f'Alert for {coin} on {exchange}: {message}', link=url_for('index'))
-
-# In send_alerts or send_webhook_alert, call notify_major_alert for each user as appropriate
-# --- In portfolio logic, create notification for significant value change or new coin added ---
-def notify_portfolio_event(user_id, event_type, message):
-    create_notification(user_id, f'portfolio_{event_type}', message, link=url_for('index'))
-
-# Expose notify_portfolio_event for import
-notify_portfolio_event = notify_portfolio_event
-
-def add_email_column():
-    with app.app_context():
+    # --- Helper to create a notification ---
+    def create_notification(user_id, ntype, message, link=None):
         db = get_db()
-        try:
-            db.execute('ALTER TABLE users ADD COLUMN email TEXT')
-            db.commit()
-        except Exception:
-            pass
-add_email_column()
+        db.execute('INSERT INTO notifications (user_id, type, message, link, read) VALUES (?, ?, ?, ?, 0)',
+                   (user_id, ntype, message, link))
+        db.commit()
 
-# --- Email notification helper (real SMTP) ---
-# Required environment variables:
-#   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM
-def send_email_notification(email, subject, message):
-    smtp_host = os.environ.get('SMTP_HOST')
-    smtp_port = int(os.environ.get('SMTP_PORT', '587'))
-    smtp_user = os.environ.get('SMTP_USER')
-    smtp_password = os.environ.get('SMTP_PASSWORD')
-    smtp_from = os.environ.get('SMTP_FROM', smtp_user)
-    if not (smtp_host and smtp_port and smtp_user and smtp_password and smtp_from):
-        print(f"[EMAIL] Missing SMTP config, not sending real email. To: {email} | Subject: {subject} | Message: {message}")
-        return
-    try:
-        msg = MIMEText(message)
-        msg['Subject'] = subject
-        msg['From'] = smtp_from
-        msg['To'] = email
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_from, [email], msg.as_string())
-        print(f"[EMAIL] Sent to {email} | Subject: {subject}")
-    except Exception as e:
-        print(f"[EMAIL] Failed to send to {email}: {e}")
-
-def generate_daily_summary(user_id, email, user_favorites):
-    # Gather summary data for user's favorite coins
-    lines = []
-    for coin in user_favorites:
-        price = fetch_market_data(coin).get('price')
-        volume = fetch_market_data(coin).get('volume')
-        whale_alerts = fetch_whale_alerts(coin)
-        sentiment = fetch_social_sentiment(coin)
-        lines.append(f"{coin.upper()}: Price ${price}, 24h Vol {volume}, Whale txs: {len(whale_alerts)}, Sentiment: {sentiment.get('score') if sentiment else 'N/A'}")
-    summary = '\n'.join(lines)
-    notify_major_alert(user_id, None, 'summary', 'daily_summary', f"Daily summary for your portfolio:\n{summary}")
-    if email:
-        send_email_notification(email, "Your Daily Crypto Summary", summary)
-
-# --- Manual endpoint to trigger daily summary for all users (for demo/testing) ---
-@app.route('/admin/send_daily_summaries')
-@admin_required
-def send_daily_summaries():
-    users = query_db('SELECT id, favorites, email, webhook_alert_types FROM users')
-    count = 0
-    for user_id, favorites, email, alert_types in users:
-        if not alert_types or 'daily_summary' not in alert_types.split(','):
-            continue
-        user_favorites = favorites.split(',') if favorites else []
-        if not user_favorites:
-            continue
-        generate_daily_summary(user_id, email, user_favorites)
-        count += 1
-    return f"Sent daily summaries to {count} users."
-
-# Add browser_notifications column to users table if not present
-def add_browser_notifications_column():
-    with app.app_context():
+    @app.route('/notifications', methods=['GET', 'POST'])
+    @login_required
+    def notifications():
+        user_id = session.get('user_id')
         db = get_db()
+        if request.method == 'POST':
+            if 'mark_read' in request.form:
+                db.execute('UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?', (request.form['mark_read'], user_id))
+                db.commit()
+            if 'clear_all' in request.form:
+                db.execute('DELETE FROM notifications WHERE user_id = ?', (user_id,))
+                db.commit()
+        notes = query_db('SELECT id, type, message, link, read, timestamp FROM notifications WHERE user_id = ? ORDER BY timestamp DESC', [user_id])
+        return render_template_string('''
+        <html><head><title>Notifications</title>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+        </head><body class="container py-5">
+        <h2>Notifications</h2>
+        <a href="{{ url_for('index') }}" class="btn btn-secondary mb-3">Back to Dashboard</a>
+        <form method="post" class="mb-3">
+            <button class="btn btn-danger" name="clear_all" value="1" type="submit">Clear All</button>
+        </form>
+        <table class="table table-bordered table-striped">
+            <thead><tr><th>Type</th><th>Message</th><th>Link</th><th>Status</th><th>Time</th><th>Actions</th></tr></thead>
+            <tbody>
+            {% for n in notes %}
+            <tr {% if not n[4] %}class="table-info"{% endif %}>
+                <td>{{ n[1] }}</td>
+                <td>{{ n[2] }}</td>
+                <td>{% if n[3] %}<a href="{{ n[3] }}">View</a>{% endif %}</td>
+                <td>{% if n[4] %}Read{% else %}Unread{% endif %}</td>
+                <td>{{ n[5] }}</td>
+                <td>
+                    {% if not n[4] %}
+                    <form method="post" style="display:inline-block">
+                        <input type="hidden" name="mark_read" value="{{ n[0] }}">
+                        <button class="btn btn-sm btn-success">Mark Read</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </body></html>
+        ''', notes=notes)
+
+    # --- Add notification on admin feedback response ---
+    # In admin_feedback, after responding, create_notification for the user
+    # --- Add notification for changelog updates (demo: notify all users on /changelog load) ---
+    # In changelog(), create_notification for all users if new entry
+    # --- Show notification count in dashboard header ---
+    # In index(), count unread notifications and pass to template
+
+    @app.route('/admin/feedback', methods=['GET', 'POST'])
+    @admin_required
+    def admin_feedback():
+        db = get_db()
+        msg = None
+        if request.method == 'POST':
+            fid = request.form.get('fid')
+            response = request.form.get('response', '').strip()
+            action = request.form.get('action')
+            if action == 'respond' and fid and response:
+                db.execute('UPDATE feedback SET response = ?, status = ? WHERE id = ?', (response, 'resolved', fid))
+                db.commit()
+                # Notify user
+                row = query_db('SELECT user_id FROM feedback WHERE id = ?', [fid], one=True)
+                if row:
+                    create_notification(row[0], 'feedback_response', f'Admin responded to your feedback: {response}', link=url_for('feedback'))
+                msg = ('success', 'Response sent and marked as resolved.')
+            elif action == 'resolve' and fid:
+                db.execute('UPDATE feedback SET status = ? WHERE id = ?', ('resolved', fid))
+                db.commit()
+                # Notify user
+                row = query_db('SELECT user_id FROM feedback WHERE id = ?', [fid], one=True)
+                if row:
+                    create_notification(row[0], 'feedback_resolved', 'Your feedback was marked as resolved.', link=url_for('feedback'))
+                msg = ('success', 'Marked as resolved.')
+        feedbacks = query_db('SELECT id, username, type, message, status, response, timestamp FROM feedback ORDER BY timestamp DESC LIMIT 50')
+        return render_template_string('''
+        <html><head><title>Admin Feedback</title>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+        </head><body class="container py-5">
+        <h2>Admin Feedback</h2>
+        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary mb-3">Back to Admin Dashboard</a>
+        <div class="mb-4">
+            <h4>Unresolved Feedback</h4>
+            <table class="table table-bordered table-striped">
+                <thead><tr><th>ID</th><th>User</th><th>Type</th><th>Message</th><th>Status</th><th>Response</th><th>Time</th><th>Actions</th></tr></thead>
+                <tbody>
+                {% for f in feedbacks %}
+                <tr>
+                    <td>{{ f[0] }}</td>
+                    <td>{{ f[1] }}</td>
+                    <td>{{ f[2] }}</td>
+                    <td>{{ f[3] }}</td>
+                    <td>{{ f[4] }}</td>
+                    <td>{{ f[5] }}</td>
+                    <td>{{ f[6] }}</td>
+                    <td>
+                        {% if f[4] == 'pending' %}
+                        <form method="post" style="display:inline-block">
+                            <input type="hidden" name="fid" value="{{ f[0] }}">
+                            <input type="hidden" name="action" value="respond">
+                            <button type="submit" class="btn btn-sm btn-primary">Respond</button>
+                        </form>
+                        <form method="post" style="display:inline-block">
+                            <input type="hidden" name="fid" value="{{ f[0] }}">
+                            <input type="hidden" name="action" value="resolve">
+                            <button type="submit" class="btn btn-sm btn-success">Mark as Resolved</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        </body></html>
+        ''', feedbacks=feedbacks, msg=msg)
+
+    # --- In alert logic, create notification for major alert ---
+    def notify_major_alert(user_id, coin, exchange, alert_type, message):
+        create_notification(user_id, f'alert_{alert_type}', f'Alert for {coin} on {exchange}: {message}', link=url_for('index'))
+
+    # In send_alerts or send_webhook_alert, call notify_major_alert for each user as appropriate
+    # --- In portfolio logic, create notification for significant value change or new coin added ---
+    def notify_portfolio_event(user_id, event_type, message):
+        create_notification(user_id, f'portfolio_{event_type}', message, link=url_for('index'))
+
+    # Expose notify_portfolio_event for import
+    notify_portfolio_event = notify_portfolio_event
+
+    def add_email_column():
+        with app.app_context():
+            db = get_db()
+            try:
+                db.execute('ALTER TABLE users ADD COLUMN email TEXT')
+                db.commit()
+            except Exception:
+                pass
+    add_email_column()
+
+    # --- Email notification helper (real SMTP) ---
+    # Required environment variables:
+    #   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM
+    def send_email_notification(email, subject, message):
+        smtp_host = os.environ.get('SMTP_HOST')
+        smtp_port = int(os.environ.get('SMTP_PORT', '587'))
+        smtp_user = os.environ.get('SMTP_USER')
+        smtp_password = os.environ.get('SMTP_PASSWORD')
+        smtp_from = os.environ.get('SMTP_FROM', smtp_user)
+        if not (smtp_host and smtp_port and smtp_user and smtp_password and smtp_from):
+            print(f"[EMAIL] Missing SMTP config, not sending real email. To: {email} | Subject: {subject} | Message: {message}")
+            return
         try:
-            db.execute('ALTER TABLE users ADD COLUMN browser_notifications INTEGER DEFAULT 0')
-            db.execute('ALTER TABLE users ADD COLUMN push_subscription TEXT')
-            db.commit()
-        except Exception:
-            pass
-add_browser_notifications_column()
+            msg = MIMEText(message)
+            msg['Subject'] = subject
+            msg['From'] = smtp_from
+            msg['To'] = email
+            with smtplib.SMTP(smtp_host, smtp_port) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_password)
+                server.sendmail(smtp_from, [email], msg.as_string())
+            print(f"[EMAIL] Sent to {email} | Subject: {subject}")
+        except Exception as e:
+            print(f"[EMAIL] Failed to send to {email}: {e}")
 
-# --- Endpoint to receive push subscription ---
-@app.route('/api/push_subscription', methods=['POST'])
-@login_required
-def save_push_subscription():
-    user_id = session.get('user_id')
-    sub = request.get_json()
-    db = get_db()
-    db.execute('UPDATE users SET push_subscription = ? WHERE id = ?', (json.dumps(sub), user_id))
-    db.commit()
-    return {'status': 'ok'}
+    def generate_daily_summary(user_id, email, user_favorites):
+        # Gather summary data for user's favorite coins
+        lines = []
+        for coin in user_favorites:
+            price = fetch_market_data(coin).get('price')
+            volume = fetch_market_data(coin).get('volume')
+            whale_alerts = fetch_whale_alerts(coin)
+            sentiment = fetch_social_sentiment(coin)
+            lines.append(f"{coin.upper()}: Price ${price}, 24h Vol {volume}, Whale txs: {len(whale_alerts)}, Sentiment: {sentiment.get('score') if sentiment else 'N/A'}")
+        summary = '\n'.join(lines)
+        notify_major_alert_with_push(user_id, None, 'summary', 'daily_summary', f"Daily summary for your portfolio:\n{summary}")
+        if email:
+            send_email_notification(email, "Your Daily Crypto Summary", summary)
 
-# --- Helper to send push notification ---
-def send_push_notification(user_id, title, message):
-    from pywebpush import webpush, WebPushException
-    row = query_db('SELECT push_subscription FROM users WHERE id = ?', [user_id], one=True)
-    if not row or not row[0]:
-        return
-    sub = json.loads(row[0])
-    try:
-        webpush(
-            subscription_info=sub,
-            data=json.dumps({'title': title, 'body': message}),
-            vapid_private_key=os.environ.get('VAPID_PRIVATE_KEY', 'test'),
-            vapid_claims={"sub": "mailto:admin@example.com"}
-        )
-    except WebPushException as ex:
-        print(f"WebPush failed: {ex}")
+    # --- Manual endpoint to trigger daily summary for all users (for demo/testing) ---
+    @app.route('/admin/send_daily_summaries')
+    @admin_required
+    def send_daily_summaries():
+        users = query_db('SELECT id, favorites, email, webhook_alert_types FROM users')
+        count = 0
+        for user_id, favorites, email, alert_types in users:
+            if not alert_types or 'daily_summary' not in alert_types.split(','):
+                continue
+            user_favorites = favorites.split(',') if favorites else []
+            if not user_favorites:
+                continue
+            generate_daily_summary(user_id, email, user_favorites)
+            count += 1
+        return f"Sent daily summaries to {count} users."
 
-# --- When sending notifications, also send push if enabled ---
-def notify_major_alert_with_push(user_id, coin, category, event_type, message):
-    notify_major_alert(user_id, coin, category, event_type, message)
-    row = query_db('SELECT browser_notifications FROM users WHERE id = ?', [user_id], one=True)
-    if row and row[0]:
-        send_push_notification(user_id, f"{category.title()} Alert", message)
-# ... replace notify_major_alert calls with notify_major_alert_with_push ...
+    # Add browser_notifications column to users table if not present
+    def add_browser_notifications_column():
+        with app.app_context():
+            db = get_db()
+            try:
+                db.execute('ALTER TABLE users ADD COLUMN browser_notifications INTEGER DEFAULT 0')
+                db.execute('ALTER TABLE users ADD COLUMN push_subscription TEXT')
+                db.commit()
+            except Exception:
+                pass
+    add_browser_notifications_column()
+
+    # --- Endpoint to receive push subscription ---
+    @app.route('/api/push_subscription', methods=['POST'])
+    @login_required
+    def save_push_subscription():
+        user_id = session.get('user_id')
+        sub = request.get_json()
+        db = get_db()
+        db.execute('UPDATE users SET push_subscription = ? WHERE id = ?', (json.dumps(sub), user_id))
+        db.commit()
+        return {'status': 'ok'}
+
+    # --- Helper to send push notification ---
+    def send_push_notification(user_id, title, message):
+        from pywebpush import webpush, WebPushException
+        row = query_db('SELECT push_subscription FROM users WHERE id = ?', [user_id], one=True)
+        if not row or not row[0]:
+            return
+        sub = json.loads(row[0])
+        try:
+            webpush(
+                subscription_info=sub,
+                data=json.dumps({'title': title, 'body': message}),
+                vapid_private_key=os.environ.get('VAPID_PRIVATE_KEY', 'test'),
+                vapid_claims={"sub": "mailto:admin@example.com"}
+            )
+        except WebPushException as ex:
+            print(f"WebPush failed: {ex}")
+
+    # --- When sending notifications, also send push if enabled ---
+    def notify_major_alert_with_push(user_id, coin, category, event_type, message):
+        notify_major_alert(user_id, coin, category, event_type, message)
+        row = query_db('SELECT browser_notifications FROM users WHERE id = ?', [user_id], one=True)
+        if row and row[0]:
+            send_push_notification(user_id, f"{category.title()} Alert", message)
 
 if __name__ == '__main__':
     init_db() # Initialize database on startup
