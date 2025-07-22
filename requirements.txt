@@ -5,3 +5,4 @@ aiohttp
 celery
 redis 
 pywebpush 
+reportlab 
