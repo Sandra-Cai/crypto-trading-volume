@@ -16,6 +16,7 @@ from werkzeug.security import generate_password_hash
 from datetime import datetime
 import secrets
 import requests as ext_requests
+from pywebpush import webpush, WebPushException
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Change this in production
@@ -374,6 +375,14 @@ def settings():
     webhook_alert_types = row[3].split(',') if row and row[3] else []
     email = row[4] if row and len(row) > 4 else ''
     alert_type_options = ['volume_spike', 'price_spike', 'whale_alert', 'technical', 'arbitrage', 'news', 'daily_summary']
+    browser_notifications = False
+    row2 = query_db('SELECT browser_notifications FROM users WHERE id = ?', [user_id], one=True)
+    if row2 and row2[0]:
+        browser_notifications = bool(row2[0])
+    if request.method == 'POST':
+        browser_notifications = 1 if request.form.get('browser_notifications') == 'on' else 0
+        db.execute('UPDATE users SET browser_notifications = ? WHERE id = ?', (browser_notifications, user_id))
+        db.commit()
     return render_template_string('''
     <html><head><title>Alert Settings</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
@@ -382,7 +391,7 @@ def settings():
     {% if test_result %}
     <div class="alert alert-{{ test_result[0] }}">{{ test_result[1] }}</div>
     {% endif %}
-    <form method="post" class="w-100 w-md-50 mx-auto">
+    <form method="post" class="w-100 w-md-50 mx-auto" id="settings-form">
         <div class="mb-3"><label class="form-label">Email:</label><input class="form-control" type="email" name="email" value="{{ email }}"></div>
         <div class="mb-3"><label class="form-label">Telegram Chat ID:</label><input class="form-control" type="text" name="telegram_id" value="{{ telegram_id }}"></div>
         <div class="mb-3"><label class="form-label">Discord Webhook URL:</label><input class="form-control" type="text" name="discord_webhook" value="{{ discord_webhook }}"></div>
@@ -395,12 +404,35 @@ def settings():
             </div>
             {% endfor %}
         </div>
+        <div class="mb-3 form-check">
+            <input class="form-check-input" type="checkbox" name="browser_notifications" id="browser_notifications" {% if browser_notifications %}checked{% endif %}>
+            <label class="form-check-label" for="browser_notifications">Enable Browser Notifications</label>
+        </div>
         <button class="btn btn-primary" type="submit">Save</button>
         <button class="btn btn-secondary ms-2" name="test_webhook" value="1" type="submit">Test Webhook</button>
     </form>
+    <script>
+    if ('serviceWorker' in navigator && window.PushManager) {
+        navigator.serviceWorker.register('/static/sw.js').then(function(reg) {
+            if (Notification.permission === 'granted') {
+                reg.pushManager.getSubscription().then(function(sub) {
+                    if (!sub) {
+                        reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: 'BElL0...YOUR_PUBLIC_KEY...'}).then(function(newSub) {
+                            fetch('/api/push_subscription', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(newSub)});
+                        });
+                    } else {
+                        fetch('/api/push_subscription', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(sub)});
+                    }
+                });
+            } else {
+                Notification.requestPermission();
+            }
+        });
+    }
+    </script>
     <div class="mt-3"><a href="{{ url_for('index') }}">Back to Dashboard</a></div>
     </body></html>
-    ''', telegram_id=telegram_id, discord_webhook=discord_webhook, webhook_url=webhook_url, webhook_alert_types=webhook_alert_types, alert_type_options=alert_type_options, test_result=test_result, email=email)
+    ''', telegram_id=telegram_id, discord_webhook=discord_webhook, webhook_url=webhook_url, webhook_alert_types=webhook_alert_types, alert_type_options=alert_type_options, test_result=test_result, email=email, browser_notifications=browser_notifications)
 
 # --- Enhanced Whale Alerts (mocked, with Redis cache) ---
 def fetch_whale_alerts(coin):
@@ -1956,6 +1988,54 @@ def send_daily_summaries():
         generate_daily_summary(user_id, email, user_favorites)
         count += 1
     return f"Sent daily summaries to {count} users."
+
+# Add browser_notifications column to users table if not present
+def add_browser_notifications_column():
+    with app.app_context():
+        db = get_db()
+        try:
+            db.execute('ALTER TABLE users ADD COLUMN browser_notifications INTEGER DEFAULT 0')
+            db.execute('ALTER TABLE users ADD COLUMN push_subscription TEXT')
+            db.commit()
+        except Exception:
+            pass
+add_browser_notifications_column()
+
+# --- Endpoint to receive push subscription ---
+@app.route('/api/push_subscription', methods=['POST'])
+@login_required
+def save_push_subscription():
+    user_id = session.get('user_id')
+    sub = request.get_json()
+    db = get_db()
+    db.execute('UPDATE users SET push_subscription = ? WHERE id = ?', (json.dumps(sub), user_id))
+    db.commit()
+    return {'status': 'ok'}
+
+# --- Helper to send push notification ---
+def send_push_notification(user_id, title, message):
+    from pywebpush import webpush, WebPushException
+    row = query_db('SELECT push_subscription FROM users WHERE id = ?', [user_id], one=True)
+    if not row or not row[0]:
+        return
+    sub = json.loads(row[0])
+    try:
+        webpush(
+            subscription_info=sub,
+            data=json.dumps({'title': title, 'body': message}),
+            vapid_private_key=os.environ.get('VAPID_PRIVATE_KEY', 'test'),
+            vapid_claims={"sub": "mailto:admin@example.com"}
+        )
+    except WebPushException as ex:
+        print(f"WebPush failed: {ex}")
+
+# --- When sending notifications, also send push if enabled ---
+def notify_major_alert_with_push(user_id, coin, category, event_type, message):
+    notify_major_alert(user_id, coin, category, event_type, message)
+    row = query_db('SELECT browser_notifications FROM users WHERE id = ?', [user_id], one=True)
+    if row and row[0]:
+        send_push_notification(user_id, f"{category.title()} Alert", message)
+# ... replace notify_major_alert calls with notify_major_alert_with_push ...
 
 if __name__ == '__main__':
     init_db() # Initialize database on startup
