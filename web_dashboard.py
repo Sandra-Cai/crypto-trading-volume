@@ -19,6 +19,7 @@ import requests as ext_requests
 from pywebpush import webpush, WebPushException
 import smtplib
 from email.mime.text import MIMEText
+import numpy as np
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Change this in production
@@ -1286,6 +1287,1509 @@ def index():
         if row and row[0]:
             send_push_notification(user_id, f"{category.title()} Alert", message)
 
+    # --- Helper: calculate correlation matrix for coins ---
+    def calculate_correlation_matrix(coins):
+        price_histories = []
+        for coin in coins:
+            prices = fetch_price_history(coin)
+            if prices and len(prices) >= 7:
+                price_histories.append(prices[-7:])
+            else:
+                price_histories.append([0]*7)
+        arr = np.array(price_histories)
+        if arr.shape[0] < 2:
+            return None, coins
+        corr = np.corrcoef(arr)
+        return corr, coins
+
+    # --- Helper: calculate volatility for coins ---
+    def calculate_volatility(coins):
+        volatilities = []
+        for coin in coins:
+            prices = fetch_price_history(coin)
+            if prices and len(prices) >= 7:
+                returns = np.diff(prices[-7:]) / np.array(prices[-7:-1])
+                vol = np.std(returns)
+            else:
+                vol = 0
+            volatilities.append((coin, vol))
+        return volatilities
+
+    # --- In index(), render new widgets if enabled ---
+    dashboard_widgets_html = ''
+    if 'market_share' in widget_prefs:
+        # This part of the code was not provided in the original file,
+        # so I'm adding a placeholder for the market share widget.
+        # In a real application, you would fetch market share data here.
+        dashboard_widgets_html += '<div class="alert alert-info">Market Share Widget Placeholder</div>'
+    if 'top_gainers' in widget_prefs:
+        # This part of the code was not provided in the original file,
+        # so I'm adding a placeholder for the top gainers widget.
+        # In a real application, you would fetch top gainers data here.
+        dashboard_widgets_html += '<div class="alert alert-success">Top Gainers Widget Placeholder</div>'
+    if 'correlation' in widget_prefs and user_favorites and len(user_favorites) > 1:
+        try:
+            corr, coins_corr = calculate_correlation_matrix(user_favorites)
+            if corr is not None:
+                import plotly.figure_factory as ff
+                heatmap = ff.create_annotated_heatmap(z=corr, x=coins_corr, y=coins_corr, colorscale='Viridis')
+                heatmap.update_layout(title='Correlation Matrix (7-day returns)')
+                dashboard_widgets_html += heatmap.to_html(full_html=False, include_plotlyjs='cdn')
+        except Exception:
+            dashboard_widgets_html += '<div class="alert alert-warning">Failed to load correlation matrix.</div>'
+    if 'volatility' in widget_prefs and user_favorites:
+        try:
+            vols = calculate_volatility(user_favorites)
+            import plotly.graph_objs as go
+            coins_vol, values_vol = zip(*vols)
+            bar = go.Figure([go.Bar(x=coins_vol, y=values_vol)])
+            bar.update_layout(title='Volatility (Std Dev of 7-day Returns)', xaxis_title='Coin', yaxis_title='Volatility')
+            dashboard_widgets_html += bar.to_html(full_html=False, include_plotlyjs='cdn')
+        except Exception:
+            dashboard_widgets_html += '<div class="alert alert-warning">Failed to load volatility data.</div>'
+
+    return render_template_string('''
+    <html><head><title>Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    </head><body class="container py-5">
+    <h1>Crypto Trading Volume Dashboard</h1>
+    <p>Welcome, {{ session['username'] }}! Here you can monitor cryptocurrency trading volumes and trends.</p>
+    <div class="row">
+        <div class="col-md-6">
+            <h2>Trending Coins</h2>
+            <p>Check out the top trending coins on CoinGecko:</p>
+            <ul>
+                {% for coin in trending %}
+                <li>{{ coin }}</li>
+                {% endfor %}
+            </ul>
+            <p>Select a coin to view its volume trends.</p>
+        </div>
+        <div class="col-md-6">
+            <h2>Your Favorite Coins</h2>
+            <p>Manage your favorite coins for alerts and quick access.</p>
+            <form method="post" action="{{ url_for('save_favorites') }}">
+                <div class="form-group">
+                    <label for="favorites">Add/Remove Favorite Coins:</label>
+                    <select multiple class="form-control" id="favorites" name="favorites">
+                        {% for coin in coins %}
+                        <option value="{{ coin }}" {% if coin in user_favorites %}selected{% endif %}>{{ coin }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary mt-3">Save Favorites</button>
+            </form>
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <h2>Volume Trends</h2>
+            <p>View 24-hour trading volume for your selected coin across different exchanges:</p>
+            <form method="post" action="{{ url_for('index') }}">
+                <div class="form-group">
+                    <label for="coin">Select Coin:</label>
+                    <select class="form-control" id="coin" name="coin">
+                        {% for coin in trending %}
+                        <option value="{{ coin }}" {% if selected_coin == coin %}selected{% endif %}>{{ coin }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group mt-3">
+                    <label for="exchange">Select Exchange:</label>
+                    <select class="form-control" id="exchange" name="exchange">
+                        <option value="all">All Exchanges</option>
+                        {% for ex in exchanges %}
+                        <option value="{{ ex }}" {% if selected_exchange == ex %}selected{% endif %}>{{ ex }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" id="trend" name="trend" value="on" {% if show_trend %}checked{% endif %}>
+                    <label class="form-check-label" for="trend">Show 7-Day Volume Trend</label>
+                </div>
+                <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" id="live" name="live" value="on" {% if live %}checked{% endif %}>
+                    <label class="form-check-label" for="live">Live Binance Volume (Demo)</label>
+                </div>
+                <div class="form-group mt-3">
+                    <label for="alert_volume">Alert on Volume Spike:</label>
+                    <input type="number" class="form-control" id="alert_volume" name="alert_volume" value="{{ alert_volume }}">
+                </div>
+                <div class="form-group mt-3">
+                    <label for="alert_price">Alert on Price Spike:</label>
+                    <input type="number" class="form-control" id="alert_price" name="alert_price" value="{{ alert_price }}">
+                </div>
+                <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" id="detect_spikes" name="detect_spikes" value="on" {% if detect_spikes %}checked{% endif %}>
+                    <label class="form-check-label" for="detect_spikes">Detect Volume Spikes</label>
+                </div>
+                <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" id="correlation" name="correlation" value="on" {% if show_correlation %}checked{% endif %}>
+                    <label class="form-check-label" for="correlation">Show Correlation Matrix</label>
+                </div>
+                <button type="submit" class="btn btn-primary mt-3">Update Dashboard</button>
+            </form>
+            {% if plot_div %}
+            <div class="mt-4">
+                <h3>Volume Trends for {{ selected_coin.upper() }}</h3>
+                {{ plot_div|safe }}
+            </div>
+            {% endif %}
+            {% if spike_alerts %}
+            <div class="mt-4 alert alert-warning">
+                <h4>Volume Spikes Detected:</h4>
+                <ul>
+                    {% for alert in spike_alerts %}
+                    <li>{{ alert }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+            {% if correlation_results %}
+            <div class="mt-4 alert alert-info">
+                <h4>Price-Volume Correlation:</h4>
+                <ul>
+                    {% for ex, corr in correlation_results.items() %}
+                    <li>{{ ex }}: {{ corr|round(2) }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+        </div>
+        <div class="col-md-6">
+            <h2>Portfolio Value</h2>
+            <p>Track the value of your cryptocurrency portfolio:</p>
+            <form method="post" action="{{ url_for('index') }}" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label for="portfolio">Upload CSV of your portfolio (coin, amount):</label>
+                    <input type="file" class="form-control-file" id="portfolio" name="portfolio">
+                </div>
+                <button type="submit" class="btn btn-primary mt-3">Update Portfolio</button>
+            </form>
+            {% if portfolio_results %}
+            <div class="mt-4 alert alert-success">
+                <h4>Portfolio Value: ${{ portfolio_results['total_value']|round(2) }}</h4>
+                <p>Total Volumes:</p>
+                <ul>
+                    {% for ex, vol in portfolio_results['total_volumes'].items() %}
+                    <li>{{ ex }}: {{ vol|round(2) }}</li>
+                    {% endfor %}
+                </ul>
+                <p>Portfolio Details:</p>
+                <table class="table table-sm">
+                    <thead><tr><th>Coin</th><th>Amount</th><th>Price</th><th>Value</th></tr></thead>
+                    <tbody>
+                        {% for detail in portfolio_results['details'] %}
+                        <tr>
+                            <td>{{ detail['coin'] }}</td>
+                            <td>{{ detail['amount'] }}</td>
+                            <td>${{ detail['price']|round(2) }}</td>
+                            <td>${{ detail['value']|round(2) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <h2>Trading Bot</h2>
+            <p>Start or stop the trading bot for your favorite coin:</p>
+            <form method="post" action="{{ url_for('bot_control') }}">
+                <div class="form-group">
+                    <label for="bot_coin">Select Coin:</label>
+                    <select class="form-control" id="bot_coin" name="bot_coin">
+                        {% for coin in trending %}
+                        <option value="{{ coin }}" {% if bot_coin == coin %}selected{% endif %}>{{ coin }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group mt-3">
+                    <label for="bot_strategy">Strategy:</label>
+                    <select class="form-control" id="bot_strategy" name="bot_strategy">
+                        <option value="volume_spike" {% if bot_strategy == 'volume_spike' %}selected{% endif %}>Volume Spike</option>
+                        <option value="rsi" {% if bot_strategy == 'rsi' %}selected{% endif %}>RSI</option>
+                        <option value="price_alerts" {% if bot_strategy == 'price_alerts' %}selected{% endif %}>Price Alerts</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary mt-3">Control Bot</button>
+                {% if bot_running %}
+                <p class="mt-3 alert alert-success">Bot is currently running for {{ bot_coin }} using {{ bot_strategy }} strategy.</p>
+                {% else %}
+                <p class="mt-3 alert alert-danger">Bot is not running.</p>
+                {% endif %}
+            </form>
+        </div>
+        <div class="col-md-6">
+            <h2>Backtesting</h2>
+            <p>Run backtests for different strategies:</p>
+            <form method="post" action="{{ url_for('backtest_control') }}">
+                <div class="form-group">
+                    <label for="backtest_coin">Select Coin:</label>
+                    <select class="form-control" id="backtest_coin" name="backtest_coin">
+                        {% for coin in trending %}
+                        <option value="{{ coin }}" {% if backtest_coin == coin %}selected{% endif %}>{{ coin }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group mt-3">
+                    <label for="backtest_strategy">Strategy:</label>
+                    <select class="form-control" id="backtest_strategy" name="backtest_strategy">
+                        <option value="volume_spike" {% if backtest_strategy == 'volume_spike' %}selected{% endif %}>Volume Spike</option>
+                        <option value="rsi" {% if backtest_strategy == 'rsi' %}selected{% endif %}>RSI</option>
+                        <option value="price_alerts" {% if backtest_strategy == 'price_alerts' %}selected{% endif %}>Price Alerts</option>
+                    </select>
+                </div>
+                <div class="form-group mt-3">
+                    <label for="backtest_days">Days for Backtest:</label>
+                    <input type="number" class="form-control" id="backtest_days" name="backtest_days" value="{{ backtest_days }}">
+                </div>
+                <button type="submit" class="btn btn-primary mt-3">Run Backtest</button>
+                {% if backtest_result %}
+                <div class="mt-4 alert alert-info">
+                    <h4>Backtest Results:</h4>
+                    {{ backtest_result }}
+                </div>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <h2>News & Sentiment</h2>
+            <p>Stay updated with the latest news and cryptocurrency sentiment:</p>
+            <form method="post" action="{{ url_for('index') }}">
+                <div class="form-group">
+                    <label for="coin">Select Coin for News:</label>
+                    <select class="form-control" id="coin" name="coin">
+                        {% for coin in trending %}
+                        <option value="{{ coin }}" {% if selected_coin == coin %}selected{% endif %}>{{ coin }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary mt-3">Update News</button>
+            </form>
+            {% if news_headlines %}
+            <div class="mt-4 alert alert-info">
+                <h4>Latest News for {{ selected_coin.upper() }}:</h4>
+                <ul>
+                    {% for headline, sentiment in news_with_sentiment %}
+                    <li>{{ headline }} (Sentiment: {{ sentiment }})</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+        </div>
+        <div class="col-md-6">
+            <h2>Whale Alerts</h2>
+            <p>Monitor large on-chain transactions:</p>
+            <form method="post" action="{{ url_for('index') }}">
+                <div class="form-group">
+                    <label for="coin">Select Coin for Whale Alerts:</label>
+                    <select class="form-control" id="coin" name="coin">
+                        {% for coin in trending %}
+                        <option value="{{ coin }}" {% if selected_coin == coin %}selected{% endif %}>{{ coin }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary mt-3">Update Whale Alerts</button>
+            </form>
+            {% if whale_alerts %}
+            <div class="mt-4 alert alert-warning">
+                <h4>Recent Whale Alerts for {{ selected_coin.upper() }}:</h4>
+                <ul>
+                    {% for alert in whale_alerts %}
+                    <li>{{ alert['amount'] }} {{ alert['coin'] }} from {{ alert['from'] }} to {{ alert['to'] }} at {{ alert['timestamp'] }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <h2>On-chain Stats</h2>
+            <p>View on-chain activity and total volume:</p>
+            <form method="post" action="{{ url_for('index') }}">
+                <div class="form-group">
+                    <label for="coin">Select Coin for On-chain Stats:</label>
+                    <select class="form-control" id="coin" name="coin">
+                        {% for coin in trending %}
+                        <option value="{{ coin }}" {% if selected_coin == coin %}selected{% endif %}>{{ coin }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary mt-3">Update On-chain Stats</button>
+            </form>
+            {% if onchain_stats %}
+            <div class="mt-4 alert alert-success">
+                <h4>On-chain Stats for {{ selected_coin.upper() }}:</h4>
+                <p>Active Addresses: {{ onchain_stats['active_addresses'] }}</p>
+                <p>Large Transfers: {{ onchain_stats['large_transfers'] }}</p>
+                <p>Total Volume: {{ onchain_stats['total_volume'] }}</p>
+            </div>
+            {% endif %}
+        </div>
+        <div class="col-md-6">
+            <h2>Settings</h2>
+            <p>Configure your alert preferences and notification settings:</p>
+            <a href="{{ url_for('settings') }}" class="btn btn-primary">Go to Settings</a>
+            <div class="mt-3">
+                <h4>Notification Preferences:</h4>
+                <p>Email: {{ email }}</p>
+                <p>Telegram Chat ID: {{ telegram_id }}</p>
+                <p>Discord Webhook URL: {{ discord_webhook }}</p>
+                <p>Browser Notifications: {% if browser_notifications %}Enabled{% else %}Disabled{% endif %}</p>
+            </div>
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <h2>Dashboard Widgets</h2>
+            <p>Customize which widgets appear on your dashboard:</p>
+            <form method="post" action="{{ url_for('index') }}">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="market_share" name="market_share" value="on" {% if 'market_share' in widget_prefs %}checked{% endif %}>
+                    <label class="form-check-label" for="market_share">Market Share</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="top_gainers" name="top_gainers" value="on" {% if 'top_gainers' in widget_prefs %}checked{% endif %}>
+                    <label class="form-check-label" for="top_gainers">Top Gainers</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="correlation" name="correlation" value="on" {% if show_correlation %}checked{% endif %}>
+                    <label class="form-check-label" for="correlation">Correlation Matrix</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="volatility" name="volatility" value="on" {% if 'volatility' in widget_prefs %}checked{% endif %}>
+                    <label class="form-check-label" for="volatility">Volatility Heatmap</label>
+                </div>
+                <button type="submit" class="btn btn-primary mt-3">Save Widget Preferences</button>
+            </form>
+            <div class="mt-4">
+                {{ dashboard_widgets_html|safe }}
+            </div>
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <h2>Notifications</h2>
+            <p>View and manage your notifications:</p>
+            <a href="{{ url_for('notifications') }}" class="btn btn-info">View Notifications</a>
+            <p class="mt-3">Unread Notifications: {{ unread_count }}</p>
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <h2>Feedback</h2>
+            <p>Share your feedback or report issues:</p>
+            <a href="{{ url_for('admin_feedback') }}" class="btn btn-warning">View Feedback</a>
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <h2>Changelog</h2>
+            <p>View the latest updates and changes to the application:</p>
+            <a href="{{ url_for('changelog') }}" class="btn btn-success">View Changelog</a>
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <h2>Language</h2>
+            <p>Select your preferred language:</p>
+            <form method="post" action="{{ url_for('setlang') }}">
+                <select class="form-control" name="lang">
+                    <option value="en" {% if lang == 'en' %}selected{% endif %}>English</option>
+                    <option value="es" {% if lang == 'es' %}selected{% endif %}>Spanish</option>
+                </select>
+                <button type="submit" class="btn btn-primary mt-3">Change Language</button>
+            </form>
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <h2>Logout</h2>
+            <p>Click to log out of your account:</p>
+            <a href="{{ url_for('logout') }}" class="btn btn-danger">Logout</a>
+        </div>
+    </div>
+    </body></html>
+    ''', trending=trending, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, live=live, alert_volume=alert_volume, alert_price=alert_price, detect_spikes=detect_spikes, show_correlation=show_correlation, coins=coins, volumes=volumes, price=price, hist=hist, exchanges=exchanges, bar=bar, layout=layout, plot_div=plot_div, spike_alerts=spike_alerts, correlation_results=correlation_results, portfolio_results=portfolio_results, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days, user_favorites=user_favorites, lang=lang, news_headlines=news_headlines, news_with_sentiment=news_with_sentiment, whale_alerts=whale_alerts, onchain_stats=onchain_stats, widget_prefs=widget_prefs, unread_count=unread_count, alert_msgs=alert_msgs, dashboard_widgets_html=dashboard_widgets_html, alert_types=alert_types)
+
+@app.route('/changelog')
+@login_required
+def changelog():
+    # In a real application, this would load a changelog.txt or similar file
+    # For now, it's a placeholder that creates a new entry if it doesn't exist
+    user_id = session.get('user_id')
+    if user_id:
+        # Check if changelog.txt exists and has content
+        changelog_file = 'changelog.txt'
+        if not os.path.exists(changelog_file):
+            with open(changelog_file, 'w') as f:
+                f.write("=== Crypto Trading Volume Changelog ===\n\n")
+                f.write("Version 1.0 (Initial Release)\n")
+                f.write("* Basic dashboard with volume trends\n")
+                f.write("* Favorite coins management\n")
+                f.write("* Trading bot (demo mode)\n")
+                f.write("* Backtesting functionality\n")
+                f.write("* News aggregation and sentiment\n")
+                f.write("* Whale alerts (mocked)\n")
+                f.write("* On-chain stats (mocked)\n")
+                f.write("* Alert settings\n")
+                f.write("* User authentication\n")
+                f.write("* Admin dashboard\n")
+                f.write("* Push notifications (demo)\n")
+                f.write("* Email notifications (demo)\n")
+                f.write("* Daily summary emails (demo)\n")
+                f.write("* Widget customization\n")
+                f.write("* Language selection\n")
+                f.write("* User profile management\n")
+                f.write("* Feedback system\n")
+                f.write("* Cache (Redis - demo)\n")
+                f.write("* Event logging\n")
+                f.write("* Technical indicators (RSI, MACD - demo)\n")
+                f.write("* Arbitrage detection (demo)\n")
+                f.write("* Social sentiment (demo)\n")
+                f.write("* Correlation matrix (demo)\n")
+                f.write("* Volatility heatmap (demo)\n")
+                f.write("* Portfolio tracking\n")
+                f.write("* Webhook alerts\n")
+                f.write("* Browser notifications (demo)\n")
+                f.write("* Push subscription handling\n")
+                f.write("* File upload for portfolio\n")
+                f.write("* Date filtering in admin logs\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* Password reset for deactivated users\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
+                f.write("* Arbitrage opportunity detection (demo)\n")
+                f.write("* Technical indicator notifications (demo)\n")
+                f.write("* Whale alert persistence\n")
+                f.write("* On-chain stats persistence\n")
+                f.write("* User deactivation/reactivation\n")
+                f.write("* User password reset\n")
+                f.write("* Admin feedback system\n")
+                f.write("* Admin dashboard with audit logs\n")
+                f.write("* API usage stats\n")
+                f.write("* Error logging\n")
+                f.write("* Alert event logging\n")
+                f.write("* Webhook test functionality\n")
+                f.write("* Daily summary emails for all users (demo)\n")
+                f.write("* Push subscription endpoint\n")
+                f.write("* Browser notification service worker\n")
+                f.write("* User dashboard preferences\n")
+                f.write("* Market share widget (placeholder)\n")
+                f.write("* Top gainers widget (placeholder)\n")
+                f.write("* Correlation matrix widget (demo)\n")
+                f.write("* Volatility heatmap widget (demo)\n")
+                f.write("* User favorites persistence\n")
+                f.write("* News sentiment spike detection (demo)\n")
 if __name__ == '__main__':
     init_db() # Initialize database on startup
     app.run(debug=True) 
