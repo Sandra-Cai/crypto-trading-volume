@@ -373,7 +373,7 @@ def settings():
     webhook_url = row[2] if row and len(row) > 2 else ''
     webhook_alert_types = row[3].split(',') if row and row[3] else []
     email = row[4] if row and len(row) > 4 else ''
-    alert_type_options = ['volume_spike', 'price_spike', 'whale_alert']
+    alert_type_options = ['volume_spike', 'price_spike', 'whale_alert', 'technical', 'arbitrage', 'news']
     return render_template_string('''
     <html><head><title>Alert Settings</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
@@ -932,6 +932,54 @@ def index():
                         send_email_notification(email, f'Whale Alert for {coin.upper()}', msg)
             session[f'last_whale_{coin}'] = set([a.get('txid') for a in whale_alerts if a.get('txid')])
 
+    # --- Technical indicator notifications ---
+    if 'technical' in alert_types:
+        for coin in user_favorites:
+            # Example: RSI and MACD
+            rsi = calculate_rsi(fetch_historical_prices(coin))
+            macd, signal, hist_macd = calculate_macd(fetch_historical_prices(coin))
+            if rsi and rsi > 70:
+                msg = f'RSI for {coin.upper()} is overbought ({rsi:.1f})'
+                notify_major_alert(user_id, coin, 'technical', 'rsi_overbought', msg)
+                if email:
+                    send_email_notification(email, f'Technical Alert for {coin.upper()}', msg)
+            if rsi and rsi < 30:
+                msg = f'RSI for {coin.upper()} is oversold ({rsi:.1f})'
+                notify_major_alert(user_id, coin, 'technical', 'rsi_oversold', msg)
+                if email:
+                    send_email_notification(email, f'Technical Alert for {coin.upper()}', msg)
+            if macd and signal and macd > signal:
+                msg = f'MACD bullish crossover detected for {coin.upper()} (MACD: {macd:.2f}, Signal: {signal:.2f})'
+                notify_major_alert(user_id, coin, 'technical', 'macd_bullish', msg)
+                if email:
+                    send_email_notification(email, f'Technical Alert for {coin.upper()}', msg)
+            if macd and signal and macd < signal:
+                msg = f'MACD bearish crossover detected for {coin.upper()} (MACD: {macd:.2f}, Signal: {signal:.2f})'
+                notify_major_alert(user_id, coin, 'technical', 'macd_bearish', msg)
+                if email:
+                    send_email_notification(email, f'Technical Alert for {coin.upper()}', msg)
+
+    # --- Arbitrage opportunity notifications ---
+    if 'arbitrage' in alert_types:
+        for coin in user_favorites:
+            arb = detect_arbitrage_opportunities(coin)
+            if arb:
+                msg = f'Arbitrage opportunity for {coin.upper()}: Buy on {arb["buy_exchange"]} at {arb["buy_price"]}, sell on {arb["sell_exchange"]} at {arb["sell_price"]} (spread: {arb["spread"]:.2f}%)'
+                notify_major_alert(user_id, coin, 'arbitrage', 'arbitrage_opportunity', msg)
+                if email:
+                    send_email_notification(email, f'Arbitrage Alert for {coin.upper()}', msg)
+
+    # --- News sentiment spike notifications ---
+    if 'news' in alert_types:
+        for coin in user_favorites:
+            sentiment = fetch_social_sentiment(coin)
+            if sentiment and abs(sentiment['change']) > 0.5:
+                direction = 'positive' if sentiment['change'] > 0 else 'negative'
+                msg = f'News sentiment spike for {coin.upper()}: {direction} ({sentiment["score"]:.2f}, change: {sentiment["change"]:+.2f})'
+                notify_major_alert(user_id, coin, 'news', f'news_sentiment_{direction}', msg)
+                if email:
+                    send_email_notification(email, f'News Sentiment Alert for {coin.upper()}', msg)
+
     return render_template_string('''
     <html>
     <head>
@@ -1341,7 +1389,7 @@ def developer_portal():
     api_events = query_db('SELECT event_type, details, timestamp FROM event_log WHERE user_id = ? AND event_type LIKE "api_%" ORDER BY timestamp DESC LIMIT 20', [user_id])
     # Recent webhook deliveries
     webhook_events = query_db('SELECT details, timestamp FROM event_log WHERE user_id = ? AND event_type = "webhook_alert" ORDER BY timestamp DESC LIMIT 20', [user_id])
-    alert_type_options = ['volume_spike', 'price_spike', 'whale_alert']
+    alert_type_options = ['volume_spike', 'price_spike', 'whale_alert', 'technical', 'arbitrage', 'news']
     # Notification badge
     unread_count = query_db('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read = 0', [user_id], one=True)[0]
     return render_template_string('''
