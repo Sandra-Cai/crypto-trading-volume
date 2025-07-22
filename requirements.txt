@@ -6,3 +6,4 @@ celery
 redis 
 pywebpush 
 reportlab 
+python-binance 
