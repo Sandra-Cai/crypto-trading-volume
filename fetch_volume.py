@@ -20,8 +20,11 @@ _cache_expiry = 60  # seconds
 # --- Redis cache setup ---
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 REDIS_CACHE_EXPIRY = int(os.environ.get('REDIS_CACHE_EXPIRY', '60'))  # seconds
+redis_client = None
 try:
     redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+    # Test the connection
+    redis_client.ping()
 except Exception:
     redis_client = None
 
