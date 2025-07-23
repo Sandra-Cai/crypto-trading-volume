@@ -1,6 +1,7 @@
 from flask import Flask, render_template_string, request, redirect, url_for, session, g, jsonify
 from fetch_volume import fetch_coingecko_trending, fetch_all_volumes, fetch_all_historical, detect_volume_spike, calculate_price_volume_correlation
 from trading_bot import TradingBot, create_strategy_config
+from functools import wraps
 import plotly.graph_objs as go
 import plotly.offline as pyo
 import requests
