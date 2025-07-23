@@ -5590,4 +5590,4 @@ def changelog():
                 f.write("* User favorites persistence\n")
 if __name__ == '__main__':
     init_db() # Initialize database on startup
-    app.run(debug=True) 
+    app.run(debug=True, port=5001) 
