@@ -28,6 +28,14 @@ app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Change this in production
 DATABASE = 'users.db'
 
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
 # --- i18n dictionary ---
 LANGUAGES = {
     'en': {
@@ -210,14 +218,7 @@ def save_favorites():
     db.commit()
     return redirect(url_for('index'))
 
-def login_required(f):
-    from functools import wraps
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not session.get('logged_in'):
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated_function
+
 
 @app.route('/bot', methods=['POST'])
 def bot_control():
