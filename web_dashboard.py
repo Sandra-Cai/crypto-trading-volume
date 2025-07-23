@@ -1630,6 +1630,147 @@ def index():
         </body></html>
         ''', coins=coins, current=current)
 
+    @app.route('/portfolio_analytics')
+    @login_required
+    def portfolio_analytics():
+        user_id = session['user_id']
+        
+        # Get current portfolio
+        portfolio_data = get_user_portfolio(user_id)
+        
+        # Calculate metrics
+        metrics = calculate_portfolio_metrics(portfolio_data)
+        
+        # Portfolio optimization
+        optimization = optimize_portfolio(portfolio_data)
+        
+        # Performance attribution
+        attribution = {}
+        if portfolio_data:
+            total_value = sum(item['value'] for item in portfolio_data)
+            for item in portfolio_data:
+                symbol = item['symbol']
+                weight = item['value'] / total_value
+                try:
+                    # Get 24h change
+                    current_data = fetch_volume.fetch_coin_data_async(symbol)
+                    if current_data:
+                        price_change_24h = current_data.get('price_change_percentage_24h', 0)
+                        contribution = weight * price_change_24h
+                        attribution[symbol] = {
+                            'weight': weight * 100,
+                            'return_24h': price_change_24h,
+                            'contribution': contribution
+                        }
+                except:
+                    continue
+        
+        return render_template_string('''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Portfolio Analytics - Crypto Trading Volume</title>
+            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+            <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+        </head>
+        <body>
+            <div class="container mt-4">
+                <h1>Portfolio Analytics</h1>
+                <a href="/" class="btn btn-secondary mb-3">← Back to Dashboard</a>
+                
+                {% if metrics %}
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5>Risk Metrics</h5>
+                            </div>
+                            <div class="card-body">
+                                <table class="table">
+                                    <tr><td>Average Return (Daily)</td><td>{{ "%.2f"|format(metrics.avg_return) }}%</td></tr>
+                                    <tr><td>Volatility</td><td>{{ "%.2f"|format(metrics.volatility) }}%</td></tr>
+                                    <tr><td>Sharpe Ratio</td><td>{{ "%.2f"|format(metrics.sharpe_ratio) }}</td></tr>
+                                    <tr><td>Maximum Drawdown</td><td>{{ "%.2f"|format(metrics.max_drawdown) }}%</td></tr>
+                                    <tr><td>VaR (95%)</td><td>{{ "%.2f"|format(metrics.var_95) }}%</td></tr>
+                                    <tr><td>Beta (vs BTC)</td><td>{{ "%.2f"|format(metrics.beta) }}</td></tr>
+                                    <tr><td>Concentration</td><td>{{ "%.2f"|format(metrics.concentration) }}%</td></tr>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5>Portfolio Optimization</h5>
+                            </div>
+                            <div class="card-body">
+                                {% if optimization %}
+                                <p><strong>Optimal Portfolio:</strong></p>
+                                <table class="table table-sm">
+                                    {% for symbol, weight in optimization.optimal_weights.items() %}
+                                    <tr><td>{{ symbol }}</td><td>{{ "%.1f"|format(weight * 100) }}%</td></tr>
+                                    {% endfor %}
+                                </table>
+                                <p><strong>Expected Return:</strong> {{ "%.2f"|format(optimization.optimal_return) }}%</p>
+                                <p><strong>Expected Volatility:</strong> {{ "%.2f"|format(optimization.optimal_volatility) }}%</p>
+                                <p><strong>Sharpe Ratio:</strong> {{ "%.2f"|format(optimization.sharpe_ratio) }}</p>
+                                {% else %}
+                                <p class="text-muted">Insufficient data for optimization</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                {% if attribution %}
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5>Performance Attribution (24h)</h5>
+                            </div>
+                            <div class="card-body">
+                                <table class="table">
+                                    <thead>
+                                        <tr>
+                                            <th>Asset</th>
+                                            <th>Weight</th>
+                                            <th>24h Return</th>
+                                            <th>Contribution</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for symbol, data in attribution.items() %}
+                                        <tr>
+                                            <td>{{ symbol }}</td>
+                                            <td>{{ "%.1f"|format(data.weight) }}%</td>
+                                            <td class="{{ 'text-success' if data.return_24h > 0 else 'text-danger' }}">
+                                                {{ "%.2f"|format(data.return_24h) }}%
+                                            </td>
+                                            <td class="{{ 'text-success' if data.contribution > 0 else 'text-danger' }}">
+                                                {{ "%.2f"|format(data.contribution) }}%
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% else %}
+                <div class="alert alert-info">
+                    No portfolio data available. Add some assets to your portfolio to see analytics.
+                </div>
+                {% endif %}
+            </div>
+        </body>
+        </html>
+        ''', metrics=metrics, optimization=optimization, attribution=attribution)
+
     return render_template_string('''
     <html><head><title>Dashboard</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
