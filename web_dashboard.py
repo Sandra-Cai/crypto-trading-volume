@@ -20,6 +20,8 @@ from pywebpush import webpush, WebPushException
 import smtplib
 from email.mime.text import MIMEText
 import numpy as np
+from scipy import stats
+from scipy.optimize import minimize
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Change this in production
@@ -1398,6 +1400,168 @@ def index():
             except Exception:
                 pass
     add_portfolio_history_table()
+
+    # --- Portfolio Analytics Functions ---
+    def calculate_portfolio_metrics(portfolio_data):
+        """Calculate advanced portfolio risk and performance metrics"""
+        if not portfolio_data:
+            return {}
+        
+        # Extract price data and weights
+        prices = {}
+        weights = {}
+        total_value = sum(item['value'] for item in portfolio_data)
+        
+        for item in portfolio_data:
+            symbol = item['symbol']
+            weights[symbol] = item['value'] / total_value
+            # Get historical prices (last 30 days)
+            try:
+                hist_data = fetch_volume.fetch_coin_historical_data_async(symbol, days=30)
+                if hist_data:
+                    prices[symbol] = [float(day['price']) for day in hist_data]
+            except:
+                continue
+        
+        if len(prices) < 2:
+            return {}
+        
+        # Calculate returns
+        returns = {}
+        for symbol, price_series in prices.items():
+            if len(price_series) > 1:
+                returns[symbol] = [(price_series[i] - price_series[i-1]) / price_series[i-1] 
+                                 for i in range(1, len(price_series))]
+        
+        # Portfolio return series
+        portfolio_returns = []
+        min_length = min(len(ret) for ret in returns.values()) if returns else 0
+        
+        for i in range(min_length):
+            daily_return = sum(returns[symbol][i] * weights[symbol] 
+                              for symbol in returns.keys())
+            portfolio_returns.append(daily_return)
+        
+        if len(portfolio_returns) < 2:
+            return {}
+        
+        # Calculate metrics
+        avg_return = np.mean(portfolio_returns)
+        volatility = np.std(portfolio_returns)
+        sharpe_ratio = avg_return / volatility if volatility > 0 else 0
+        
+        # Maximum drawdown
+        cumulative = np.cumprod(1 + np.array(portfolio_returns))
+        running_max = np.maximum.accumulate(cumulative)
+        drawdown = (cumulative - running_max) / running_max
+        max_drawdown = np.min(drawdown)
+        
+        # VaR (Value at Risk) - 95% confidence
+        var_95 = np.percentile(portfolio_returns, 5)
+        
+        # Beta calculation (vs BTC)
+        try:
+            btc_returns = returns.get('BTC', [])
+            if len(btc_returns) >= len(portfolio_returns):
+                btc_returns = btc_returns[:len(portfolio_returns)]
+                beta = np.cov(portfolio_returns, btc_returns)[0,1] / np.var(btc_returns)
+            else:
+                beta = 1.0
+        except:
+            beta = 1.0
+        
+        return {
+            'avg_return': avg_return * 100,  # Convert to percentage
+            'volatility': volatility * 100,
+            'sharpe_ratio': sharpe_ratio,
+            'max_drawdown': max_drawdown * 100,
+            'var_95': var_95 * 100,
+            'beta': beta,
+            'total_assets': len(portfolio_data),
+            'concentration': max(weights.values()) * 100 if weights else 0
+        }
+
+    def optimize_portfolio(portfolio_data, target_return=None, risk_free_rate=0.02):
+        """Optimize portfolio using Modern Portfolio Theory"""
+        if not portfolio_data:
+            return {}
+        
+        # Get historical data for all assets
+        symbols = [item['symbol'] for item in portfolio_data]
+        returns_data = {}
+        
+        for symbol in symbols:
+            try:
+                hist_data = fetch_volume.fetch_coin_historical_data_async(symbol, days=90)
+                if hist_data:
+                    prices = [float(day['price']) for day in hist_data]
+                    returns = [(prices[i] - prices[i-1]) / prices[i-1] 
+                              for i in range(1, len(prices))]
+                    returns_data[symbol] = returns
+            except:
+                continue
+        
+        if len(returns_data) < 2:
+            return {}
+        
+        # Calculate expected returns and covariance matrix
+        expected_returns = {symbol: np.mean(returns) for symbol, returns in returns_data.items()}
+        symbols_list = list(returns_data.keys())
+        
+        # Create covariance matrix
+        min_length = min(len(returns) for returns in returns_data.values())
+        returns_matrix = np.array([returns_data[symbol][:min_length] for symbol in symbols_list])
+        cov_matrix = np.cov(returns_matrix)
+        
+        # Portfolio optimization
+        n_assets = len(symbols_list)
+        
+        def portfolio_volatility(weights):
+            return np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+        
+        def portfolio_return(weights):
+            return np.sum([expected_returns[symbol] * weights[i] 
+                          for i, symbol in enumerate(symbols_list)])
+        
+        def objective(weights):
+            return portfolio_volatility(weights)
+        
+        # Constraints
+        constraints = [
+            {'type': 'eq', 'fun': lambda x: np.sum(x) - 1}  # weights sum to 1
+        ]
+        
+        if target_return is not None:
+            constraints.append({
+                'type': 'eq', 
+                'fun': lambda x: portfolio_return(x) - target_return
+            })
+        
+        # Bounds: no short selling
+        bounds = tuple((0, 1) for _ in range(n_assets))
+        
+        # Initial guess: equal weights
+        initial_weights = np.array([1/n_assets] * n_assets)
+        
+        try:
+            result = minimize(objective, initial_weights, 
+                             method='SLSQP', bounds=bounds, constraints=constraints)
+            
+            if result.success:
+                optimal_weights = result.x
+                optimal_volatility = portfolio_volatility(optimal_weights)
+                optimal_return = portfolio_return(optimal_weights)
+                
+                return {
+                    'optimal_weights': dict(zip(symbols_list, optimal_weights)),
+                    'optimal_volatility': optimal_volatility * 100,
+                    'optimal_return': optimal_return * 100,
+                    'sharpe_ratio': (optimal_return - risk_free_rate) / optimal_volatility
+                }
+        except:
+            pass
+        
+        return {}
 
     # --- In index(), after portfolio processing ---
     # Store historical portfolio value
