@@ -1,9 +1,18 @@
 import asyncio
 import json
 import time
+import requests
 from datetime import datetime
 from fetch_volume import fetch_all_volumes, detect_volume_spike, calculate_rsi
 import websockets
+
+def fetch_price(symbol):
+    url = f'https://api.coingecko.com/api/v3/simple/price?ids={symbol.lower()}&vs_currencies=usd'
+    response = requests.get(url)
+    if response.status_code != 200:
+        return None
+    data = response.json()
+    return data.get(symbol.lower(), {}).get('usd')
 
 class TradingBot:
     def __init__(self, strategy_config, demo_mode=True):
