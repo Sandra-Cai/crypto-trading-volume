@@ -2,7 +2,7 @@ import asyncio
 import json
 import time
 from datetime import datetime
-from fetch_volume import fetch_all_volumes, fetch_price, detect_volume_spike, calculate_rsi
+from fetch_volume import fetch_all_volumes, detect_volume_spike, calculate_rsi
 import websockets
 
 class TradingBot:
