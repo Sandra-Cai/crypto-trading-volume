@@ -1,4 +1,13 @@
-from fetch_volume import fetch_all_historical, fetch_price_history, calculate_rsi
+from fetch_volume import fetch_all_historical, calculate_rsi
+import requests
+
+def fetch_price_history(symbol, days=7):
+    url = f'https://api.coingecko.com/api/v3/coins/{symbol.lower()}/market_chart?vs_currency=usd&days={days}'
+    response = requests.get(url)
+    if response.status_code != 200:
+        return []
+    data = response.json()
+    return [price[1] for price in data['prices']]
 
 def backtest_volume_spike(coin, days=30, spike_threshold=2.0, buy_amount=100):
     hist = fetch_all_historical(coin.upper(), days)
