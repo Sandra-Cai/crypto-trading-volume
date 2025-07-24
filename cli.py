@@ -74,7 +74,40 @@ def main():
     parser.add_argument('--bot-strategy', type=str, choices=['volume_spike', 'rsi', 'price_alerts', 'all'], default='all', help='Trading strategy to use')
     parser.add_argument('--backtest', action='store_true', help='Run backtest on historical data')
     parser.add_argument('--backtest-strategy', type=str, choices=['volume_spike', 'rsi'], default='volume_spike', help='Backtest strategy to use')
+    parser.add_argument('--sentiment', action='store_true', help='Show comprehensive sentiment analysis')
     args = parser.parse_args()
+
+    if args.sentiment:
+        if not args.coin:
+            print('Error: --coin is required for sentiment analysis')
+            return
+        
+        print(f"Analyzing sentiment for {args.coin.upper()}...")
+        try:
+            from fetch_volume import fetch_market_sentiment_analysis
+            sentiment = fetch_market_sentiment_analysis(args.coin)
+            if sentiment:
+                print(f"\n📊 Sentiment Analysis for {sentiment['symbol']}")
+                print("=" * 50)
+                print(f"Overall Sentiment: {sentiment['overall_sentiment'].upper()}")
+                print(f"Composite Score: {sentiment['composite_score']:.3f}")
+                print(f"\nComponent Scores:")
+                print(f"  News Sentiment: {sentiment['components']['news_sentiment']:.3f}")
+                print(f"  RSI Sentiment: {sentiment['components']['rsi_sentiment']:.3f}")
+                print(f"  MACD Sentiment: {sentiment['components']['macd_sentiment']:.3f}")
+                print(f"  Volume Sentiment: {sentiment['components']['volume_sentiment']:.3f}")
+                print(f"\nNews Breakdown:")
+                print(f"  Positive: {sentiment['news_breakdown']['positive']}")
+                print(f"  Negative: {sentiment['news_breakdown']['negative']}")
+                print(f"  Neutral: {sentiment['news_breakdown']['neutral']}")
+                print(f"  Total: {sentiment['news_breakdown']['total']}")
+                if sentiment['social_sentiment']:
+                    print(f"\nSocial Sentiment: {sentiment['social_sentiment']}")
+            else:
+                print(f"Could not analyze sentiment for {args.coin}")
+        except Exception as e:
+            print(f"Error analyzing sentiment: {e}")
+        return
 
     if args.backtest:
         if not args.coin:

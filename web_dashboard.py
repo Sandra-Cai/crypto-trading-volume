@@ -1948,6 +1948,202 @@ def index():
         ''', username=username, chart_data=chart_data, market_dominance=market_dominance, 
              trending=trending, favorite_coins=favorite_coins)
 
+@app.route('/sentiment')
+@login_required
+def sentiment_dashboard():
+    """Real-time market sentiment analysis dashboard"""
+    user_id = session['user_id']
+    user = query_db('SELECT username, favorites FROM users WHERE id = ?', [user_id], one=True)
+    
+    if not user:
+        return redirect(url_for('login'))
+    
+    username, favorites = user
+    favorite_coins = favorites.split(',') if favorites else []
+    
+    # Get sentiment analysis for favorite coins
+    sentiment_data = {}
+    for coin in favorite_coins[:5]:  # Limit to 5 coins for performance
+        try:
+            from fetch_volume import fetch_market_sentiment_analysis
+            sentiment = fetch_market_sentiment_analysis(coin)
+            if sentiment:
+                sentiment_data[coin.upper()] = sentiment
+        except Exception as e:
+            print(f"Error fetching sentiment for {coin}: {e}")
+    
+    return render_template_string('''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Market Sentiment Analysis - Crypto Volume Tracker</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+            .container { max-width: 1400px; margin: 0 auto; }
+            .header { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .sentiment-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px; }
+            .sentiment-card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .sentiment-score { font-size: 2.5em; font-weight: bold; margin: 10px 0; }
+            .sentiment-bullish { color: #27ae60; }
+            .sentiment-bearish { color: #e74c3c; }
+            .sentiment-neutral { color: #7f8c8d; }
+            .component-bar { background: #ecf0f1; height: 8px; border-radius: 4px; margin: 5px 0; }
+            .component-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+            .component-fill-positive { background: #27ae60; }
+            .component-fill-negative { background: #e74c3c; }
+            .component-fill-neutral { background: #7f8c8d; }
+            .chart-container { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .chart-title { font-size: 1.5em; margin-bottom: 20px; color: #2c3e50; }
+            .nav-links { margin-bottom: 20px; }
+            .nav-links a { display: inline-block; margin-right: 15px; padding: 8px 16px; background: #3498db; color: white; text-decoration: none; border-radius: 5px; }
+            .nav-links a:hover { background: #2980b9; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>📊 Market Sentiment Analysis</h1>
+                <p>Welcome back, {{ username }}! Real-time sentiment analysis for your favorite coins.</p>
+                <div class="nav-links">
+                    <a href="/">← Main Dashboard</a>
+                    <a href="/analytics">📈 Analytics</a>
+                    <a href="/settings">⚙️ Settings</a>
+                </div>
+            </div>
+            
+            <!-- Sentiment Cards -->
+            <div class="sentiment-grid">
+                {% for coin, sentiment in sentiment_data.items() %}
+                <div class="sentiment-card">
+                    <h3>{{ coin }}</h3>
+                    <div class="sentiment-score sentiment-{{ sentiment.overall_sentiment }}">
+                        {% if sentiment.composite_score > 0 %}
+                            +{{ "%.2f"|format(sentiment.composite_score) }}
+                        {% else %}
+                            {{ "%.2f"|format(sentiment.composite_score) }}
+                        {% endif %}
+                    </div>
+                    <p><strong>Overall Sentiment:</strong> 
+                        <span class="sentiment-{{ sentiment.overall_sentiment }}">
+                            {{ sentiment.overall_sentiment.upper() }}
+                        </span>
+                    </p>
+                    
+                    <h4>Sentiment Components:</h4>
+                    <div>
+                        <div>News Sentiment: {{ "%.2f"|format(sentiment.components.news_sentiment) }}</div>
+                        <div class="component-bar">
+                            <div class="component-fill {% if sentiment.components.news_sentiment > 0 %}component-fill-positive{% elif sentiment.components.news_sentiment < 0 %}component-fill-negative{% else %}component-fill-neutral{% endif %}" 
+                                 style="width: {{ (sentiment.components.news_sentiment + 1) * 50 }}%"></div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <div>RSI Sentiment: {{ "%.2f"|format(sentiment.components.rsi_sentiment) }}</div>
+                        <div class="component-bar">
+                            <div class="component-fill {% if sentiment.components.rsi_sentiment > 0 %}component-fill-positive{% elif sentiment.components.rsi_sentiment < 0 %}component-fill-negative{% else %}component-fill-neutral{% endif %}" 
+                                 style="width: {{ (sentiment.components.rsi_sentiment + 1) * 50 }}%"></div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <div>MACD Sentiment: {{ "%.2f"|format(sentiment.components.macd_sentiment) }}</div>
+                        <div class="component-bar">
+                            <div class="component-fill {% if sentiment.components.macd_sentiment > 0 %}component-fill-positive{% elif sentiment.components.macd_sentiment < 0 %}component-fill-negative{% else %}component-fill-neutral{% endif %}" 
+                                 style="width: {{ (sentiment.components.macd_sentiment + 1) * 50 }}%"></div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <div>Volume Sentiment: {{ "%.2f"|format(sentiment.components.volume_sentiment) }}</div>
+                        <div class="component-bar">
+                            <div class="component-fill {% if sentiment.components.volume_sentiment > 0 %}component-fill-positive{% elif sentiment.components.volume_sentiment < 0 %}component-fill-negative{% else %}component-fill-neutral{% endif %}" 
+                                 style="width: {{ (sentiment.components.volume_sentiment + 1) * 50 }}%"></div>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 15px; font-size: 0.9em; color: #7f8c8d;">
+                        <strong>News Breakdown:</strong><br>
+                        Positive: {{ sentiment.news_breakdown.positive }} | 
+                        Negative: {{ sentiment.news_breakdown.negative }} | 
+                        Neutral: {{ sentiment.news_breakdown.neutral }}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            
+            <!-- Sentiment Comparison Chart -->
+            {% if sentiment_data %}
+            <div class="chart-container">
+                <div class="chart-title">Sentiment Comparison Across Coins</div>
+                <div id="sentiment-chart"></div>
+            </div>
+            {% endif %}
+        </div>
+        
+        <script>
+            const sentimentData = {{ sentiment_data | tojson }};
+            
+            if (Object.keys(sentimentData).length > 0) {
+                const coins = Object.keys(sentimentData);
+                const scores = coins.map(coin => sentimentData[coin].composite_score);
+                const colors = scores.map(score => 
+                    score > 0.3 ? '#27ae60' : score < -0.3 ? '#e74c3c' : '#7f8c8d'
+                );
+                
+                const trace = {
+                    x: coins,
+                    y: scores,
+                    type: 'bar',
+                    marker: {
+                        color: colors
+                    },
+                    text: scores.map(score => score > 0 ? '+' + score.toFixed(2) : score.toFixed(2)),
+                    textposition: 'auto'
+                };
+                
+                const layout = {
+                    title: 'Composite Sentiment Scores',
+                    xaxis: { title: 'Cryptocurrency' },
+                    yaxis: { 
+                        title: 'Sentiment Score',
+                        range: [-1, 1]
+                    },
+                    shapes: [
+                        {
+                            type: 'line',
+                            x0: -0.5,
+                            x1: coins.length - 0.5,
+                            y0: 0.3,
+                            y1: 0.3,
+                            line: { color: '#27ae60', dash: 'dash' }
+                        },
+                        {
+                            type: 'line',
+                            x0: -0.5,
+                            x1: coins.length - 0.5,
+                            y0: -0.3,
+                            y1: -0.3,
+                            line: { color: '#e74c3c', dash: 'dash' }
+                        }
+                    ]
+                };
+                
+                Plotly.newPlot('sentiment-chart', [trace], layout);
+            }
+            
+            // Auto-refresh every 60 seconds
+            setInterval(() => {
+                location.reload();
+            }, 60000);
+        </script>
+    </body>
+    </html>
+    ''', username=username, sentiment_data=sentiment_data)
+
 @app.route('/changelog')
 @login_required
 def changelog():
