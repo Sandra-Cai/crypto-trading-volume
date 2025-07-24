@@ -6,4 +6,8 @@ celery
 redis 
 pywebpush 
 reportlab 
-python-binance 
+python-binance
+scikit-learn
+numpy
+pandas
+scipy 
