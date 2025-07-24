@@ -302,6 +302,19 @@ def fetch_news(coin):
         pass
     return []
 
+def fetch_price_history(symbol, days=7):
+    """Fetch price history for a given symbol"""
+    try:
+        url = f'https://api.coingecko.com/api/v3/coins/{symbol.lower()}/market_chart?vs_currency=usd&days={days}'
+        response = requests.get(url)
+        if response.status_code != 200:
+            return []
+        data = response.json()
+        return [price[1] for price in data['prices']]
+    except Exception as e:
+        print(f"Error fetching price history for {symbol}: {e}")
+        return []
+
 def simple_sentiment(text):
     # Very basic sentiment: positive if contains 'up', 'bull', negative if 'down', 'bear', else neutral
     text = text.lower()
@@ -1786,375 +1799,154 @@ def index():
         </html>
         ''', metrics=metrics, optimization=optimization, attribution=attribution)
 
-    return render_template_string('''
-    <html><head><title>Dashboard</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
-    </head><body class="container py-5">
-    <h1>Crypto Trading Volume Dashboard</h1>
-    <p>Welcome, {{ session['username'] }}! Here you can monitor cryptocurrency trading volumes and trends.</p>
-    <div class="row">
-        <div class="col-md-6">
-            <h2>Trending Coins</h2>
-            <p>Check out the top trending coins on CoinGecko:</p>
-            <ul>
-                {% for coin in trending %}
-                <li>{{ coin }}</li>
-                {% endfor %}
-            </ul>
-            <p>Select a coin to view its volume trends.</p>
-        </div>
-        <div class="col-md-6">
-            <h2>Your Favorite Coins</h2>
-            <p>Manage your favorite coins for alerts and quick access.</p>
-            <form method="post" action="{{ url_for('save_favorites') }}">
-                <div class="form-group">
-                    <label for="favorites">Add/Remove Favorite Coins:</label>
-                    <select multiple class="form-control" id="favorites" name="favorites">
-                        {% for coin in coins %}
-                        <option value="{{ coin }}" {% if coin in user_favorites %}selected{% endif %}>{{ coin }}</option>
-                        {% endfor %}
-                    </select>
+    @app.route('/analytics')
+    @login_required
+    def analytics_dashboard():
+        """Enhanced analytics dashboard with real-time charts and advanced metrics"""
+        user_id = session['user_id']
+        user = query_db('SELECT username, favorites FROM users WHERE id = ?', [user_id], one=True)
+        
+        if not user:
+            return redirect(url_for('login'))
+        
+        username, favorites = user
+        favorite_coins = favorites.split(',') if favorites else []
+        
+        # Get market overview data
+        try:
+            from fetch_volume import fetch_market_dominance
+            market_dominance = fetch_market_dominance()
+        except:
+            market_dominance = {}
+        
+        # Get trending coins for comparison
+        try:
+            trending = fetch_coingecko_trending()
+        except:
+            trending = []
+        
+        # Prepare chart data for favorite coins
+        chart_data = {}
+        for coin in favorite_coins[:5]:  # Limit to 5 coins for performance
+            try:
+                symbol = coin.upper()
+                volumes = fetch_all_volumes(symbol)
+                historical = fetch_all_historical(symbol, days=7)
+                
+                if volumes and historical:
+                    chart_data[symbol] = {
+                        'volumes': volumes,
+                        'historical': historical,
+                        'price_data': fetch_price_history(symbol, days=7)
+                    }
+            except Exception as e:
+                print(f"Error fetching data for {coin}: {e}")
+        
+        return render_template_string('''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Analytics Dashboard - Crypto Volume Tracker</title>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+            <style>
+                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+                .container { max-width: 1400px; margin: 0 auto; }
+                .header { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+                .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }
+                .metric-card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+                .metric-value { font-size: 2em; font-weight: bold; color: #2c3e50; }
+                .metric-label { color: #7f8c8d; margin-top: 5px; }
+                .chart-container { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+                .chart-title { font-size: 1.5em; margin-bottom: 20px; color: #2c3e50; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>📊 Analytics Dashboard</h1>
+                    <p>Welcome back, {{ username }}! Here's your comprehensive market analysis.</p>
                 </div>
-                <button type="submit" class="btn btn-primary mt-3">Save Favorites</button>
-            </form>
-        </div>
-    </div>
-    <div class="row mt-4">
-        <div class="col-md-6">
-            <h2>Volume Trends</h2>
-            <p>View 24-hour trading volume for your selected coin across different exchanges:</p>
-            <form method="post" action="{{ url_for('index') }}">
-                <div class="form-group">
-                    <label for="coin">Select Coin:</label>
-                    <select class="form-control" id="coin" name="coin">
-                        {% for coin in trending %}
-                        <option value="{{ coin }}" {% if selected_coin == coin %}selected{% endif %}>{{ coin }}</option>
-                        {% endfor %}
-                    </select>
+                
+                <!-- Market Overview Metrics -->
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-value">{{ market_dominance.get('bitcoin', 0) | round(2) }}%</div>
+                        <div class="metric-label">Bitcoin Dominance</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">{{ market_dominance.get('ethereum', 0) | round(2) }}%</div>
+                        <div class="metric-label">Ethereum Dominance</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">{{ trending | length }}</div>
+                        <div class="metric-label">Trending Coins</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">{{ favorite_coins | length }}</div>
+                        <div class="metric-label">Your Watchlist</div>
+                    </div>
                 </div>
-                <div class="form-group mt-3">
-                    <label for="exchange">Select Exchange:</label>
-                    <select class="form-control" id="exchange" name="exchange">
-                        <option value="all">All Exchanges</option>
-                        {% for ex in exchanges %}
-                        <option value="{{ ex }}" {% if selected_exchange == ex %}selected{% endif %}>{{ ex }}</option>
-                        {% endfor %}
-                    </select>
+                
+                <!-- Volume Chart -->
+                <div class="chart-container">
+                    <div class="chart-title">24h Trading Volume by Exchange</div>
+                    <div id="volume-chart"></div>
                 </div>
-                <div class="form-check mt-3">
-                    <input class="form-check-input" type="checkbox" id="trend" name="trend" value="on" {% if show_trend %}checked{% endif %}>
-                    <label class="form-check-label" for="trend">Show 7-Day Volume Trend</label>
+                
+                <!-- Trend Chart -->
+                <div class="chart-container">
+                    <div class="chart-title">7-Day Volume Trends</div>
+                    <div id="trend-chart"></div>
                 </div>
-                <div class="form-check mt-3">
-                    <input class="form-check-input" type="checkbox" id="live" name="live" value="on" {% if live %}checked{% endif %}>
-                    <label class="form-check-label" for="live">Live Binance Volume (Demo)</label>
-                </div>
-                <div class="form-group mt-3">
-                    <label for="alert_volume">Alert on Volume Spike:</label>
-                    <input type="number" class="form-control" id="alert_volume" name="alert_volume" value="{{ alert_volume }}">
-                </div>
-                <div class="form-group mt-3">
-                    <label for="alert_price">Alert on Price Spike:</label>
-                    <input type="number" class="form-control" id="alert_price" name="alert_price" value="{{ alert_price }}">
-                </div>
-                <div class="form-check mt-3">
-                    <input class="form-check-input" type="checkbox" id="detect_spikes" name="detect_spikes" value="on" {% if detect_spikes %}checked{% endif %}>
-                    <label class="form-check-label" for="detect_spikes">Detect Volume Spikes</label>
-                </div>
-                <div class="form-check mt-3">
-                    <input class="form-check-input" type="checkbox" id="correlation" name="correlation" value="on" {% if show_correlation %}checked{% endif %}>
-                    <label class="form-check-label" for="correlation">Show Correlation Matrix</label>
-                </div>
-                <button type="submit" class="btn btn-primary mt-3">Update Dashboard</button>
-            </form>
-            {% if plot_div %}
-            <div class="mt-4">
-                <h3>Volume Trends for {{ selected_coin.upper() }}</h3>
-                {{ plot_div|safe }}
             </div>
-            {% endif %}
-            {% if spike_alerts %}
-            <div class="mt-4 alert alert-warning">
-                <h4>Volume Spikes Detected:</h4>
-                <ul>
-                    {% for alert in spike_alerts %}
-                    <li>{{ alert }}</li>
-                    {% endfor %}
-                </ul>
-            </div>
-            {% endif %}
-            {% if correlation_results %}
-            <div class="mt-4 alert alert-info">
-                <h4>Price-Volume Correlation:</h4>
-                <ul>
-                    {% for ex, corr in correlation_results.items() %}
-                    <li>{{ ex }}: {{ corr|round(2) }}</li>
-                    {% endfor %}
-                </ul>
-            </div>
-            {% endif %}
-        </div>
-        <div class="col-md-6">
-            <h2>Portfolio Value</h2>
-            <p>Track the value of your cryptocurrency portfolio:</p>
-            <form method="post" action="{{ url_for('index') }}" enctype="multipart/form-data">
-                <div class="form-group">
-                    <label for="portfolio">Upload CSV of your portfolio (coin, amount):</label>
-                    <input type="file" class="form-control-file" id="portfolio" name="portfolio">
-                </div>
-                <button type="submit" class="btn btn-primary mt-3">Update Portfolio</button>
-            </form>
-            {% if portfolio_results %}
-            <div class="mt-4 alert alert-success">
-                <h4>Portfolio Value: ${{ portfolio_results['total_value']|round(2) }}</h4>
-                <p>Total Volumes:</p>
-                <ul>
-                    {% for ex, vol in portfolio_results['total_volumes'].items() %}
-                    <li>{{ ex }}: {{ vol|round(2) }}</li>
-                    {% endfor %}
-                </ul>
-                <p>Portfolio Details:</p>
-                <table class="table table-sm">
-                    <thead><tr><th>Coin</th><th>Amount</th><th>Price</th><th>Value</th></tr></thead>
-                    <tbody>
-                        {% for detail in portfolio_results['details'] %}
-                        <tr>
-                            <td>{{ detail['coin'] }}</td>
-                            <td>{{ detail['amount'] }}</td>
-                            <td>${{ detail['price']|round(2) }}</td>
-                            <td>${{ detail['value']|round(2) }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-    <div class="row mt-4">
-        <div class="col-md-6">
-            <h2>Trading Bot</h2>
-            <p>Start or stop the trading bot for your favorite coin:</p>
-            <form method="post" action="{{ url_for('bot_control') }}">
-                <div class="form-group">
-                    <label for="bot_coin">Select Coin:</label>
-                    <select class="form-control" id="bot_coin" name="bot_coin">
-                        {% for coin in trending %}
-                        <option value="{{ coin }}" {% if bot_coin == coin %}selected{% endif %}>{{ coin }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="form-group mt-3">
-                    <label for="bot_strategy">Strategy:</label>
-                    <select class="form-control" id="bot_strategy" name="bot_strategy">
-                        <option value="volume_spike" {% if bot_strategy == 'volume_spike' %}selected{% endif %}>Volume Spike</option>
-                        <option value="rsi" {% if bot_strategy == 'rsi' %}selected{% endif %}>RSI</option>
-                        <option value="price_alerts" {% if bot_strategy == 'price_alerts' %}selected{% endif %}>Price Alerts</option>
-                    </select>
-                </div>
-                <button type="submit" class="btn btn-primary mt-3">Control Bot</button>
-                {% if bot_running %}
-                <p class="mt-3 alert alert-success">Bot is currently running for {{ bot_coin }} using {{ bot_strategy }} strategy.</p>
-                {% else %}
-                <p class="mt-3 alert alert-danger">Bot is not running.</p>
-                {% endif %}
-            </form>
-        </div>
-        <div class="col-md-6">
-            <h2>Backtesting</h2>
-            <p>Run backtests for different strategies:</p>
-            <form method="post" action="{{ url_for('backtest_control') }}">
-                <div class="form-group">
-                    <label for="backtest_coin">Select Coin:</label>
-                    <select class="form-control" id="backtest_coin" name="backtest_coin">
-                        {% for coin in trending %}
-                        <option value="{{ coin }}" {% if backtest_coin == coin %}selected{% endif %}>{{ coin }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="form-group mt-3">
-                    <label for="backtest_strategy">Strategy:</label>
-                    <select class="form-control" id="backtest_strategy" name="backtest_strategy">
-                        <option value="volume_spike" {% if backtest_strategy == 'volume_spike' %}selected{% endif %}>Volume Spike</option>
-                        <option value="rsi" {% if backtest_strategy == 'rsi' %}selected{% endif %}>RSI</option>
-                        <option value="price_alerts" {% if backtest_strategy == 'price_alerts' %}selected{% endif %}>Price Alerts</option>
-                    </select>
-                </div>
-                <div class="form-group mt-3">
-                    <label for="backtest_days">Days for Backtest:</label>
-                    <input type="number" class="form-control" id="backtest_days" name="backtest_days" value="{{ backtest_days }}">
-                </div>
-                <button type="submit" class="btn btn-primary mt-3">Run Backtest</button>
-                {% if backtest_result %}
-                <div class="mt-4 alert alert-info">
-                    <h4>Backtest Results:</h4>
-                    {{ backtest_result }}
-                </div>
-                {% endif %}
-            </form>
-        </div>
-    </div>
-    <div class="row mt-4">
-        <div class="col-md-6">
-            <h2>News & Sentiment</h2>
-            <p>Stay updated with the latest news and cryptocurrency sentiment:</p>
-            <form method="post" action="{{ url_for('index') }}">
-                <div class="form-group">
-                    <label for="coin">Select Coin for News:</label>
-                    <select class="form-control" id="coin" name="coin">
-                        {% for coin in trending %}
-                        <option value="{{ coin }}" {% if selected_coin == coin %}selected{% endif %}>{{ coin }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <button type="submit" class="btn btn-primary mt-3">Update News</button>
-            </form>
-            {% if news_headlines %}
-            <div class="mt-4 alert alert-info">
-                <h4>Latest News for {{ selected_coin.upper() }}:</h4>
-                <ul>
-                    {% for headline, sentiment in news_with_sentiment %}
-                    <li>{{ headline }} (Sentiment: {{ sentiment }})</li>
-                    {% endfor %}
-                </ul>
-            </div>
-            {% endif %}
-        </div>
-        <div class="col-md-6">
-            <h2>Whale Alerts</h2>
-            <p>Monitor large on-chain transactions:</p>
-            <form method="post" action="{{ url_for('index') }}">
-                <div class="form-group">
-                    <label for="coin">Select Coin for Whale Alerts:</label>
-                    <select class="form-control" id="coin" name="coin">
-                        {% for coin in trending %}
-                        <option value="{{ coin }}" {% if selected_coin == coin %}selected{% endif %}>{{ coin }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <button type="submit" class="btn btn-primary mt-3">Update Whale Alerts</button>
-            </form>
-            {% if whale_alerts %}
-            <div class="mt-4 alert alert-warning">
-                <h4>Recent Whale Alerts for {{ selected_coin.upper() }}:</h4>
-                <ul>
-                    {% for alert in whale_alerts %}
-                    <li>{{ alert['amount'] }} {{ alert['coin'] }} from {{ alert['from'] }} to {{ alert['to'] }} at {{ alert['timestamp'] }}</li>
-                    {% endfor %}
-                </ul>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-    <div class="row mt-4">
-        <div class="col-md-6">
-            <h2>On-chain Stats</h2>
-            <p>View on-chain activity and total volume:</p>
-            <form method="post" action="{{ url_for('index') }}">
-                <div class="form-group">
-                    <label for="coin">Select Coin for On-chain Stats:</label>
-                    <select class="form-control" id="coin" name="coin">
-                        {% for coin in trending %}
-                        <option value="{{ coin }}" {% if selected_coin == coin %}selected{% endif %}>{{ coin }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <button type="submit" class="btn btn-primary mt-3">Update On-chain Stats</button>
-            </form>
-            {% if onchain_stats %}
-            <div class="mt-4 alert alert-success">
-                <h4>On-chain Stats for {{ selected_coin.upper() }}:</h4>
-                <p>Active Addresses: {{ onchain_stats['active_addresses'] }}</p>
-                <p>Large Transfers: {{ onchain_stats['large_transfers'] }}</p>
-                <p>Total Volume: {{ onchain_stats['total_volume'] }}</p>
-            </div>
-            {% endif %}
-        </div>
-        <div class="col-md-6">
-            <h2>Settings</h2>
-            <p>Configure your alert preferences and notification settings:</p>
-            <a href="{{ url_for('settings') }}" class="btn btn-primary">Go to Settings</a>
-            <div class="mt-3">
-                <h4>Notification Preferences:</h4>
-                <p>Email: {{ email }}</p>
-                <p>Telegram Chat ID: {{ telegram_id }}</p>
-                <p>Discord Webhook URL: {{ discord_webhook }}</p>
-                <p>Browser Notifications: {% if browser_notifications %}Enabled{% else %}Disabled{% endif %}</p>
-            </div>
-        </div>
-    </div>
-    <div class="row mt-4">
-        <div class="col-md-12">
-            <h2>Dashboard Widgets</h2>
-            <p>Customize which widgets appear on your dashboard:</p>
-            <form method="post" action="{{ url_for('index') }}">
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="market_share" name="market_share" value="on" {% if 'market_share' in widget_prefs %}checked{% endif %}>
-                    <label class="form-check-label" for="market_share">Market Share</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="top_gainers" name="top_gainers" value="on" {% if 'top_gainers' in widget_prefs %}checked{% endif %}>
-                    <label class="form-check-label" for="top_gainers">Top Gainers</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="correlation" name="correlation" value="on" {% if show_correlation %}checked{% endif %}>
-                    <label class="form-check-label" for="correlation">Correlation Matrix</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="volatility" name="volatility" value="on" {% if 'volatility' in widget_prefs %}checked{% endif %}>
-                    <label class="form-check-label" for="volatility">Volatility Heatmap</label>
-                </div>
-                <button type="submit" class="btn btn-primary mt-3">Save Widget Preferences</button>
-            </form>
-            <div class="mt-4">
-                {{ dashboard_widgets_html|safe }}
-            </div>
-        </div>
-    </div>
-    <div class="row mt-4">
-        <div class="col-md-12">
-            <h2>Notifications</h2>
-            <p>View and manage your notifications:</p>
-            <a href="{{ url_for('notifications') }}" class="btn btn-info">View Notifications</a>
-            <p class="mt-3">Unread Notifications: {{ unread_count }}</p>
-        </div>
-    </div>
-    <div class="row mt-4">
-        <div class="col-md-12">
-            <h2>Feedback</h2>
-            <p>Share your feedback or report issues:</p>
-            <a href="{{ url_for('admin_feedback') }}" class="btn btn-warning">View Feedback</a>
-        </div>
-    </div>
-    <div class="row mt-4">
-        <div class="col-md-12">
-            <h2>Changelog</h2>
-            <p>View the latest updates and changes to the application:</p>
-            <a href="{{ url_for('changelog') }}" class="btn btn-success">View Changelog</a>
-        </div>
-    </div>
-    <div class="row mt-4">
-        <div class="col-md-12">
-            <h2>Language</h2>
-            <p>Select your preferred language:</p>
-            <form method="post" action="{{ url_for('setlang') }}">
-                <select class="form-control" name="lang">
-                    <option value="en" {% if lang == 'en' %}selected{% endif %}>English</option>
-                    <option value="es" {% if lang == 'es' %}selected{% endif %}>Spanish</option>
-                </select>
-                <button type="submit" class="btn btn-primary mt-3">Change Language</button>
-            </form>
-        </div>
-    </div>
-    <div class="row mt-4">
-        <div class="col-md-12">
-            <h2>Logout</h2>
-            <p>Click to log out of your account:</p>
-            <a href="{{ url_for('logout') }}" class="btn btn-danger">Logout</a>
-        </div>
-    </div>
-    </body></html>
-    ''', trending=trending, selected_coin=selected_coin, selected_exchange=selected_exchange, show_trend=show_trend, live=live, alert_volume=alert_volume, alert_price=alert_price, detect_spikes=detect_spikes, show_correlation=show_correlation, coins=coins, volumes=volumes, price=price, hist=hist, exchanges=exchanges, bar=bar, layout=layout, plot_div=plot_div, spike_alerts=spike_alerts, correlation_results=correlation_results, portfolio_results=portfolio_results, bot_running=bot_running, bot_coin=bot_coin, bot_strategy=bot_strategy, bot_portfolio=bot_portfolio, bot_trades=bot_trades, backtest_result=backtest_result, backtest_coin=backtest_coin, backtest_strategy=backtest_strategy, backtest_days=backtest_days, user_favorites=user_favorites, lang=lang, news_headlines=news_headlines, news_with_sentiment=news_with_sentiment, whale_alerts=whale_alerts, onchain_stats=onchain_stats, widget_prefs=widget_prefs, unread_count=unread_count, alert_msgs=alert_msgs, dashboard_widgets_html=dashboard_widgets_html, alert_types=alert_types)
+            
+            <script>
+                const chartData = {{ chart_data | tojson }};
+                
+                if (Object.keys(chartData).length > 0) {
+                    const coins = Object.keys(chartData);
+                    const exchanges = ['binance', 'coinbase', 'kraken', 'kucoin', 'okx', 'bybit'];
+                    
+                    const volumeData = exchanges.map(exchange => ({
+                        x: coins,
+                        y: coins.map(coin => chartData[coin]?.volumes?.[exchange] || 0),
+                        name: exchange.charAt(0).toUpperCase() + exchange.slice(1),
+                        type: 'bar'
+                    }));
+                    
+                    Plotly.newPlot('volume-chart', volumeData, {
+                        title: '24h Trading Volume by Exchange',
+                        barmode: 'group',
+                        xaxis: { title: 'Cryptocurrency' },
+                        yaxis: { title: 'Volume (USD)' }
+                    });
+                    
+                    const trendData = coins.map(coin => ({
+                        x: Array.from({length: 7}, (_, i) => `Day ${i+1}`),
+                        y: chartData[coin]?.historical?.binance || [],
+                        name: coin,
+                        type: 'scatter',
+                        mode: 'lines+markers'
+                    }));
+                    
+                    Plotly.newPlot('trend-chart', trendData, {
+                        title: '7-Day Volume Trends',
+                        xaxis: { title: 'Day' },
+                        yaxis: { title: 'Volume (USD)' }
+                    });
+                }
+                
+                // Auto-refresh every 30 seconds
+                setInterval(() => {
+                    location.reload();
+                }, 30000);
+            </script>
+        </body>
+        </html>
+        ''', username=username, chart_data=chart_data, market_dominance=market_dominance, 
+             trending=trending, favorite_coins=favorite_coins)
 
 @app.route('/changelog')
 @login_required
