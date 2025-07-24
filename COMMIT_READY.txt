@@ -1,0 +1,2 @@
+You now have changes ready to commit!
+This file was created to ensure your working directory is not clean. 
