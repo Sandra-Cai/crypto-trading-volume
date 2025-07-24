@@ -751,7 +751,7 @@ def admin_dashboard():
     </div>
     </body></html>
     ''', events=events, users=users, celery_status=celery_status, cache_stats=cache_stats, api_bar=api_bar)
-
+    
 # ... (rest of the code remains unchanged)
 
 # --- Alerts management in admin dashboard ---
@@ -5638,37 +5638,37 @@ def changelog():
                 f.write("* Volatility heatmap widget (demo)\n")
                 f.write("* User favorites persistence\n")
 @app.route('/ml-predictions')
-@login_required
-def ml_predictions_dashboard():
+    @login_required
+    def ml_predictions_dashboard():
     """Machine Learning Predictions Dashboard"""
     try:
         from ml_predictions import CryptoPricePredictor
         
         predictor = CryptoPricePredictor()
         predictions = {}
-        
+
         # Get user's favorite coins
         user_favorites = query_db('SELECT favorites FROM users WHERE id = ?', [session['user_id']], one=True)
         if user_favorites and user_favorites[0]:
             favorites = json.loads(user_favorites[0])
-            
+
             for coin in favorites[:5]:  # Limit to 5 coins
                 try:
                     # Try to load existing models
                     if predictor.load_models(coin):
                         prediction = predictor.predict_price(coin)
-                        if prediction:
+                    if prediction:
                             confidence = predictor.get_prediction_confidence(coin)
                             predictions[coin] = {
-                                'current_price': prediction['current_price'],
-                                'predicted_price': prediction['predicted_price'],
-                                'predicted_change': prediction['predicted_change'],
-                                'confidence': confidence,
+                            'current_price': prediction['current_price'],
+                            'predicted_price': prediction['predicted_price'],
+                            'predicted_change': prediction['predicted_change'],
+                            'confidence': confidence,
                                 'individual_predictions': prediction['individual_predictions']
                             }
                 except Exception as e:
                     print(f"Error predicting {coin}: {e}")
-        
+
         return render_template_string('''
         <!DOCTYPE html>
         <html>
