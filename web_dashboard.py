@@ -2142,7 +2142,45 @@ def sentiment_dashboard():
         </script>
     </body>
     </html>
-    ''', username=username, sentiment_data=sentiment_data)
+         ''', username=username, sentiment_data=sentiment_data)
+
+@app.route('/api/sentiment/<coin>')
+def api_sentiment(coin):
+    """API endpoint for sentiment analysis"""
+    try:
+        from fetch_volume import fetch_market_sentiment_analysis
+        sentiment = fetch_market_sentiment_analysis(coin)
+        if sentiment:
+            return jsonify(sentiment)
+        else:
+            return jsonify({'error': 'Could not analyze sentiment'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sentiment/batch', methods=['POST'])
+def api_sentiment_batch():
+    """API endpoint for batch sentiment analysis"""
+    try:
+        data = request.get_json()
+        coins = data.get('coins', [])
+        if not coins:
+            return jsonify({'error': 'No coins provided'}), 400
+        
+        results = {}
+        from fetch_volume import fetch_market_sentiment_analysis
+        
+        for coin in coins[:10]:  # Limit to 10 coins
+            sentiment = fetch_market_sentiment_analysis(coin)
+            if sentiment:
+                results[coin.upper()] = sentiment
+        
+        return jsonify({
+            'results': results,
+            'total_analyzed': len(results),
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/changelog')
 @login_required

@@ -4,7 +4,7 @@ This project provides real-time monitoring and analysis of trending cryptocurren
 
 ## Features
 - Real-time tracking of trading volumes for top cryptocurrencies
-- Aggregation of data from6 major exchanges (Binance, Coinbase, Kraken, KuCoin, OKX, Bybit)
+- Aggregation of data from 6 major exchanges (Binance, Coinbase, Kraken, KuCoin, OKX, Bybit)
 - Advanced trend analysis with moving averages and volume spike detection
 - Price-volume correlation analysis for market insights
 - Alerts for significant volume changes or unusual activity
@@ -15,6 +15,9 @@ This project provides real-time monitoring and analysis of trending cryptocurren
 - API rate limiting and caching for improved performance
 - Volume spike detection (20x average threshold)
 - Statistical correlation analysis between price and volume movements
+- **NEW: Enhanced Analytics Dashboard** with real-time charts and market metrics
+- **NEW: Real-time Market Sentiment Analysis** combining news, social, technical indicators, and volume data
+- **NEW: Sentiment API endpoints** for programmatic access to sentiment data
 
 ## Quick Start with Docker
 
@@ -37,12 +40,15 @@ docker-compose up -d
 docker build -t crypto-trading-volume .
 
 # Run the container
-docker run -p 50000pto-trading-volume
+docker run -p 5000:5000 crypto-trading-volume
 
-# Access the dashboard at http://localhost:50anual Installation
+# Access the dashboard at http://localhost:5000
+```
+
+## Manual Installation
 
 ### Prerequisites
-- Python 30.9 or higher
+- Python 3.9 or higher
 - pip
 
 ### Installation Steps
@@ -63,32 +69,27 @@ docker run -p 50000pto-trading-volume
    python web_dashboard.py
    
    # Or use the CLI
-   python cli.py --top5# Pip Installation
-```bash
-# Install from PyPI (when published)
-pip install crypto-trading-volume
-
-# Use the CLI
-crypto-volume --top 5
-
-# Start the dashboard
-crypto-dashboard
-```
+   python cli.py --top 5
+   ```
 
 ## Usage
 
 ### Web Dashboard
-1. Start the application and navigate to `http://localhost:50ogin with username: `user`, password: `pass`3t a coin, exchange, and enable features like trends, spike detection, or correlation analysis
+1. Start the application and navigate to `http://localhost:5000`
+2. Login with username: `user`, password: `pass`
+3. Select a coin, exchange, and enable features like trends, spike detection, or correlation analysis
 4. Upload a portfolio CSV file (columns: `coin,amount`) for portfolio tracking
+5. **NEW: Visit `/analytics` for enhanced analytics dashboard**
+6. **NEW: Visit `/sentiment` for real-time sentiment analysis**
 
 ### Command Line Interface
 
 #### Basic Usage
 ```bash
-# Show top7nding coins
+# Show top 7 trending coins
 python cli.py
 
-# Show top5nding coins
+# Show top 5 trending coins
 python cli.py --top 5
 
 # Query specific coin
@@ -104,7 +105,9 @@ python cli.py --trend
 #### Advanced Features
 ```bash
 # Set volume alerts
-python cli.py --alert-volume 100# Set price alerts
+python cli.py --alert-volume 1000000
+
+# Set price alerts
 python cli.py --alert-price 50000
 
 # Export results to CSV
@@ -113,22 +116,29 @@ python cli.py --export-csv results.csv
 # Portfolio tracking
 python cli.py --portfolio my_portfolio.csv
 
-# Detect volume spikes (20average)
+# Detect volume spikes (20x average)
 python cli.py --detect-spikes
 
 # Calculate price-volume correlation
 python cli.py --correlation
 
+# NEW: Comprehensive sentiment analysis
+python cli.py --coin bitcoin --sentiment
+
 # Combine multiple features
-python cli.py --coin bitcoin --trend --detect-spikes --correlation --export-csv analysis.csv
+python cli.py --coin bitcoin --trend --detect-spikes --correlation --sentiment --export-csv analysis.csv
 ```
 
 #### Portfolio CSV Format
 Create a CSV file with columns `coin` and `amount`:
 ```csv
 coin,amount
-bitcoin,0.5thereum,2.0
-solana,10.0Advanced Analytics
+bitcoin,0.5
+ethereum,2.0
+solana,10.0
+```
+
+## Advanced Analytics
 
 ### Volume Spike Detection
 The system automatically detects when trading volume is significantly higher than the 7-day average:
@@ -143,10 +153,84 @@ Calculate the statistical correlation between price and volume changes:
 - Available for all supported exchanges
 
 ### Multi-Exchange Analysis
-Compare trading volumes across6 major exchanges:
+Compare trading volumes across 6 major exchanges:
 - Binance, Coinbase, Kraken, KuCoin, OKX, Bybit
 - Aggregated data for comprehensive market view
 - Exchange-specific trend analysis
+
+### **NEW: Market Sentiment Analysis**
+Comprehensive sentiment analysis combining multiple data sources:
+- **News Sentiment**: Analyzes recent news headlines for positive/negative sentiment
+- **Social Sentiment**: Tracks social media sentiment trends
+- **Technical Indicators**: RSI and MACD sentiment analysis
+- **Volume Sentiment**: Volume trend analysis
+- **Composite Score**: Weighted combination of all sentiment factors
+- **Real-time Updates**: Auto-refreshing sentiment dashboard
+
+#### Sentiment Components:
+- **News Sentiment (30% weight)**: Based on recent news headlines
+- **RSI Sentiment (20% weight)**: Technical indicator sentiment
+- **MACD Sentiment (20% weight)**: Moving average convergence divergence
+- **Volume Sentiment (30% weight)**: Volume trend analysis
+
+#### Sentiment Categories:
+- **Bullish**: Composite score > 0.3
+- **Bearish**: Composite score < -0.3
+- **Neutral**: Score between -0.3 and 0.3
+
+## API Endpoints
+
+### New Sentiment Analysis Endpoints
+
+#### Get Sentiment for Single Coin
+```bash
+GET /api/sentiment/bitcoin
+```
+
+Response:
+```json
+{
+  "symbol": "BITCOIN",
+  "composite_score": 0.45,
+  "overall_sentiment": "bullish",
+  "components": {
+    "news_sentiment": 0.6,
+    "rsi_sentiment": 0.5,
+    "macd_sentiment": 0.3,
+    "volume_sentiment": 0.4
+  },
+  "news_breakdown": {
+    "positive": 8,
+    "negative": 2,
+    "neutral": 5,
+    "total": 15
+  },
+  "timestamp": "2024-01-15T10:30:00"
+}
+```
+
+#### Batch Sentiment Analysis
+```bash
+POST /api/sentiment/batch
+Content-Type: application/json
+
+{
+  "coins": ["bitcoin", "ethereum", "solana"]
+}
+```
+
+Response:
+```json
+{
+  "results": {
+    "BITCOIN": { /* sentiment data */ },
+    "ETHEREUM": { /* sentiment data */ },
+    "SOLANA": { /* sentiment data */ }
+  },
+  "total_analyzed": 3,
+  "timestamp": "2024-01-15T10:30:00"
+}
+```
 
 ## Background Tasking (Celery)
 
@@ -196,7 +280,8 @@ docker run -d -p 5000:5000 --name crypto-app crypto-trading-volume
 ### Cloud Deployment
 The application can be deployed to various cloud platforms:
 
-#### Heroku1Create a `Procfile`:
+#### Heroku
+1. Create a `Procfile`:
    ```
    web: python web_dashboard.py
    ```
@@ -220,7 +305,7 @@ The application can be deployed to various cloud platforms:
 
 ## API Rate Limits
 The application includes caching to handle API rate limits:
-- CoinGecko:50calls/minute
+- CoinGecko: 50 calls/minute
 - Binance: 1200 requests/minute
 - Coinbase: 3 requests/second
 - Kraken: 15 requests/10 seconds
@@ -231,7 +316,9 @@ The application includes caching to handle API rate limits:
 ## Troubleshooting
 
 ### Common Issues
-1PI Errors**: Check your internet connection and API availability2 **Port Already in Use**: Change the port in docker-compose.yml or use a different port3 **Login Issues**: Default credentials are `user`/`pass` - change these for production
+1. **API Errors**: Check your internet connection and API availability
+2. **Port Already in Use**: Change the port in docker-compose.yml or use a different port
+3. **Login Issues**: Default credentials are `user`/`pass` - change these for production
 
 ### Logs
 ```bash
@@ -250,6 +337,7 @@ This project is licensed under the MIT License.
 
 ## Performance
 - All exchange and market data fetching is now fully asynchronous, powered by [aiohttp](https://docs.aiohttp.org/), for high performance and scalability.
+- **NEW: Sentiment analysis is cached for 5 minutes to improve performance**
 
 ## Requirements
 - Python 3.8+
@@ -277,6 +365,8 @@ The platform exposes a REST API for third-party integrations and power users.
 - `GET /api/onchain/<coin>` — Get on-chain stats for a coin
 - `GET /api/whale_alerts/<coin>` — Get recent whale transactions for a coin
 - `GET /api/portfolio` — Get user portfolio (favorites); requires API key
+- **NEW: `GET /api/sentiment/<coin>` — Get comprehensive sentiment analysis for a coin**
+- **NEW: `POST /api/sentiment/batch` — Get sentiment analysis for multiple coins**
 
 ### Authentication
 
@@ -294,6 +384,11 @@ curl https://yourdomain/api/trending
 #### Get volumes for Bitcoin
 ```bash
 curl https://yourdomain/api/volumes/bitcoin
+```
+
+#### Get sentiment analysis for Bitcoin
+```bash
+curl https://yourdomain/api/sentiment/bitcoin
 ```
 
 #### Get user portfolio (with API key)
