@@ -23,10 +23,16 @@ from email.mime.text import MIMEText
 import numpy as np
 from scipy import stats
 from scipy.optimize import minimize
+from flasgger import Swagger, swag_from
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Change this in production
 DATABASE = 'users.db'
+
+swagger = Swagger(app)
+limiter = Limiter(app, key_func=get_remote_address)
 
 def login_required(f):
     @wraps(f)
@@ -745,6 +751,8 @@ def admin_dashboard():
     </div>
     </body></html>
     ''', events=events, users=users, celery_status=celery_status, cache_stats=cache_stats, api_bar=api_bar)
+
+# ... (rest of the code remains unchanged)
 
 # --- Alerts management in admin dashboard ---
 @app.route('/admin/alerts', methods=['GET', 'POST'])
