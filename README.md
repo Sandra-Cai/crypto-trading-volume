@@ -3,6 +3,8 @@
 This project provides real-time monitoring and analysis of trending cryptocurrencies' trading volumes across major exchange platforms. It is designed to help both exchange operators and individual traders make informed decisions by identifying market trends, unusual activity, and potential trading opportunities.
 
 ## Features
+
+### Core Features
 - Real-time tracking of trading volumes for top cryptocurrencies
 - Aggregation of data from 6 major exchanges (Binance, Coinbase, Kraken, KuCoin, OKX, Bybit)
 - Advanced trend analysis with moving averages and volume spike detection
@@ -15,9 +17,24 @@ This project provides real-time monitoring and analysis of trending cryptocurren
 - API rate limiting and caching for improved performance
 - Volume spike detection (20x average threshold)
 - Statistical correlation analysis between price and volume movements
-- **NEW: Enhanced Analytics Dashboard** with real-time charts and market metrics
-- **NEW: Real-time Market Sentiment Analysis** combining news, social, technical indicators, and volume data
-- **NEW: Sentiment API endpoints** for programmatic access to sentiment data
+
+### 🧠 Advanced AI & ML Features
+- **Machine Learning Price Predictions**: Ensemble ML models (Random Forest, Gradient Boosting, Linear Regression)
+- **Advanced Backtesting**: Multi-strategy testing with ML integration
+- **Enhanced Trading Bot**: AI-powered trading with sentiment analysis and risk management
+- **Comprehensive Sentiment Analysis**: Multi-source sentiment scoring with technical indicators
+- **Risk Management**: Advanced position sizing and portfolio protection
+- **Technical Indicators**: RSI, MACD, Moving Averages, Volume Analysis
+- **Real-time Predictions**: Live price predictions with confidence scoring
+- **Model Persistence**: Save and load trained ML models
+- **Performance Analytics**: Detailed trading performance metrics
+
+### 📊 Enhanced Dashboards
+- **Enhanced Analytics Dashboard** with real-time charts and market metrics
+- **Real-time Market Sentiment Analysis** combining news, social, technical indicators, and volume data
+- **ML Predictions Dashboard** with AI-powered price forecasts
+- **Advanced Backtesting Dashboard** for strategy testing and optimization
+- **Sentiment API endpoints** for programmatic access to sentiment data
 
 ## Quick Start with Docker
 
@@ -81,6 +98,8 @@ docker run -p 5000:5000 crypto-trading-volume
 4. Upload a portfolio CSV file (columns: `coin,amount`) for portfolio tracking
 5. **NEW: Visit `/analytics` for enhanced analytics dashboard**
 6. **NEW: Visit `/sentiment` for real-time sentiment analysis**
+7. **NEW: Visit `/ml-predictions` for AI-powered price predictions**
+8. **NEW: Visit `/advanced-backtest` for strategy testing and optimization**
 
 ### Command Line Interface
 
@@ -125,8 +144,14 @@ python cli.py --correlation
 # NEW: Comprehensive sentiment analysis
 python cli.py --coin bitcoin --sentiment
 
+# NEW: Machine learning predictions
+python cli.py --coin bitcoin --ml-predict
+
+# NEW: Advanced backtesting
+python cli.py --coin bitcoin --backtest --days 90
+
 # Combine multiple features
-python cli.py --coin bitcoin --trend --detect-spikes --correlation --sentiment --export-csv analysis.csv
+python cli.py --coin bitcoin --trend --detect-spikes --correlation --sentiment --ml-predict --export-csv analysis.csv
 ```
 
 #### Portfolio CSV Format
@@ -177,6 +202,87 @@ Comprehensive sentiment analysis combining multiple data sources:
 - **Bullish**: Composite score > 0.3
 - **Bearish**: Composite score < -0.3
 - **Neutral**: Score between -0.3 and 0.3
+
+## 🧠 Advanced AI & ML Features
+
+### Machine Learning Price Predictions
+The platform now includes sophisticated ML models for price prediction:
+
+#### Features:
+- **Ensemble Models**: Combines Random Forest, Gradient Boosting, and Linear Regression
+- **Feature Engineering**: 20+ technical and market features
+- **Real-time Predictions**: Live price forecasts with confidence scoring
+- **Model Persistence**: Save and load trained models
+- **Performance Metrics**: R², RMSE, MAE for model evaluation
+
+#### Usage:
+```bash
+# Train models for a coin
+python ml_predictions.py
+
+# Get predictions via API
+curl http://localhost:5001/api/ml-predict/bitcoin
+
+# View predictions dashboard
+# Visit http://localhost:5001/ml-predictions
+```
+
+### Advanced Backtesting
+Comprehensive backtesting system with multiple strategies:
+
+#### Supported Strategies:
+- **RSI Strategy**: Buy oversold (<30), sell overbought (>70)
+- **MACD Strategy**: Bullish/bearish crossover signals
+- **Volume Spike Strategy**: Buy on 2x volume spikes
+- **Moving Average Strategy**: Golden/death cross signals
+- **Machine Learning Strategy**: AI-powered direction prediction
+
+#### Usage:
+```bash
+# Run backtest via CLI
+python cli.py --coin bitcoin --backtest --days 90
+
+# Use web dashboard
+# Visit http://localhost:5001/advanced-backtest
+```
+
+### Enhanced Trading Bot
+AI-powered trading bot with advanced risk management:
+
+#### Features:
+- **Multi-Strategy Execution**: Combines ML, sentiment, and technical analysis
+- **Risk Management**: Position sizing, stop-loss, daily loss limits
+- **Confidence-Based Trading**: Adjusts position size based on prediction confidence
+- **Performance Tracking**: Real-time P&L and trade history
+- **Portfolio Protection**: Maximum position limits and drawdown protection
+
+#### Configuration:
+```python
+config = {
+    'ml_enabled': True,
+    'sentiment_enabled': True,
+    'volume_spike_enabled': True,
+    'rsi_enabled': True,
+    'macd_enabled': True,
+    'risk_management': {
+        'max_position_size': 0.1,  # 10% max per position
+        'stop_loss': 0.05,         # 5% stop loss
+        'max_daily_loss': 0.02     # 2% daily loss limit
+    }
+}
+```
+
+### Testing Advanced Features
+Run the comprehensive test suite:
+
+```bash
+# Test all advanced features
+python test_advanced_features.py
+
+# Test individual components
+python test_new_features.py
+python demo_new_features.py
+```
 
 ## API Endpoints
 
