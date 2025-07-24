@@ -671,3 +671,113 @@ def main():
 
 if __name__ == '__main__':
     main() 
+
+def fetch_market_sentiment_analysis(symbol):
+    """Fetch comprehensive market sentiment analysis from multiple sources"""
+    try:
+        # Get social sentiment
+        social_sentiment = fetch_social_sentiment(symbol)
+        
+        # Get news sentiment
+        news_headlines = fetch_news(symbol)
+        news_sentiment = {
+            'positive': len([h for h in news_headlines if simple_sentiment(h) == 'positive']),
+            'negative': len([h for h in news_headlines if simple_sentiment(h) == 'negative']),
+            'neutral': len([h for h in news_headlines if simple_sentiment(h) == 'neutral']),
+            'total': len(news_headlines)
+        }
+        
+        # Calculate overall sentiment score
+        if news_sentiment['total'] > 0:
+            news_score = (news_sentiment['positive'] - news_sentiment['negative']) / news_sentiment['total']
+        else:
+            news_score = 0
+            
+        # Get technical indicators sentiment
+        try:
+            hist_data = fetch_all_historical(symbol.upper(), days=14)
+            if hist_data and hist_data.get('binance'):
+                rsi = calculate_rsi(hist_data['binance'])
+                macd, signal, hist_macd = calculate_macd(hist_data['binance'])
+                
+                # RSI sentiment
+                if rsi:
+                    if rsi > 70:
+                        rsi_sentiment = -0.5  # Overbought
+                    elif rsi < 30:
+                        rsi_sentiment = 0.5   # Oversold
+                    else:
+                        rsi_sentiment = 0     # Neutral
+                else:
+                    rsi_sentiment = 0
+                
+                # MACD sentiment
+                if macd and signal:
+                    if macd > signal:
+                        macd_sentiment = 0.3  # Bullish
+                    else:
+                        macd_sentiment = -0.3 # Bearish
+                else:
+                    macd_sentiment = 0
+            else:
+                rsi_sentiment = 0
+                macd_sentiment = 0
+        except:
+            rsi_sentiment = 0
+            macd_sentiment = 0
+        
+        # Volume sentiment (based on recent volume trends)
+        try:
+            volumes = fetch_all_volumes(symbol.upper())
+            if volumes and volumes.get('binance'):
+                current_volume = volumes['binance']
+                hist_volumes = hist_data.get('binance', []) if hist_data else []
+                if hist_volumes and len(hist_volumes) >= 3:
+                    avg_volume = sum(hist_volumes[-3:]) / 3
+                    if current_volume > avg_volume * 1.5:
+                        volume_sentiment = 0.4  # High volume
+                    elif current_volume < avg_volume * 0.5:
+                        volume_sentiment = -0.2 # Low volume
+                    else:
+                        volume_sentiment = 0    # Normal volume
+                else:
+                    volume_sentiment = 0
+            else:
+                volume_sentiment = 0
+        except:
+            volume_sentiment = 0
+        
+        # Calculate composite sentiment score
+        composite_score = (
+            news_score * 0.3 +
+            rsi_sentiment * 0.2 +
+            macd_sentiment * 0.2 +
+            volume_sentiment * 0.3
+        )
+        
+        # Determine overall sentiment
+        if composite_score > 0.3:
+            overall_sentiment = 'bullish'
+        elif composite_score < -0.3:
+            overall_sentiment = 'bearish'
+        else:
+            overall_sentiment = 'neutral'
+        
+        return {
+            'symbol': symbol.upper(),
+            'composite_score': composite_score,
+            'overall_sentiment': overall_sentiment,
+            'components': {
+                'news_sentiment': news_score,
+                'rsi_sentiment': rsi_sentiment,
+                'macd_sentiment': macd_sentiment,
+                'volume_sentiment': volume_sentiment
+            },
+            'news_breakdown': news_sentiment,
+            'social_sentiment': social_sentiment,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        print(f"Error fetching sentiment analysis for {symbol}: {e}")
+        return None 
