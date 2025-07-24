@@ -5629,6 +5629,384 @@ def changelog():
                 f.write("* Correlation matrix widget (demo)\n")
                 f.write("* Volatility heatmap widget (demo)\n")
                 f.write("* User favorites persistence\n")
+@app.route('/ml-predictions')
+@login_required
+def ml_predictions_dashboard():
+    """Machine Learning Predictions Dashboard"""
+    try:
+        from ml_predictions import CryptoPricePredictor
+        
+        predictor = CryptoPricePredictor()
+        predictions = {}
+        
+        # Get user's favorite coins
+        user_favorites = query_db('SELECT favorites FROM users WHERE id = ?', [session['user_id']], one=True)
+        if user_favorites and user_favorites[0]:
+            favorites = json.loads(user_favorites[0])
+            
+            for coin in favorites[:5]:  # Limit to 5 coins
+                try:
+                    # Try to load existing models
+                    if predictor.load_models(coin):
+                        prediction = predictor.predict_price(coin)
+                        if prediction:
+                            confidence = predictor.get_prediction_confidence(coin)
+                            predictions[coin] = {
+                                'current_price': prediction['current_price'],
+                                'predicted_price': prediction['predicted_price'],
+                                'predicted_change': prediction['predicted_change'],
+                                'confidence': confidence,
+                                'individual_predictions': prediction['individual_predictions']
+                            }
+                except Exception as e:
+                    print(f"Error predicting {coin}: {e}")
+        
+        return render_template_string('''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>ML Predictions Dashboard</title>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+            <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+            <style>
+                .prediction-card { border-left: 4px solid #007bff; }
+                .prediction-positive { border-left-color: #28a745; }
+                .prediction-negative { border-left-color: #dc3545; }
+                .confidence-high { color: #28a745; }
+                .confidence-medium { color: #ffc107; }
+                .confidence-low { color: #dc3545; }
+            </style>
+        </head>
+        <body>
+            <div class="container-fluid mt-4">
+                <div class="row">
+                    <div class="col-12">
+                        <h2><i class="fas fa-brain"></i> Machine Learning Predictions</h2>
+                        <p class="text-muted">AI-powered price predictions using ensemble machine learning models</p>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5>Price Predictions</h5>
+                            </div>
+                            <div class="card-body">
+                                {% if predictions %}
+                                    <div class="row">
+                                        {% for coin, pred in predictions.items() %}
+                                        <div class="col-md-6 col-lg-4 mb-3">
+                                            <div class="card prediction-card {% if pred.predicted_change > 0 %}prediction-positive{% else %}prediction-negative{% endif %}">
+                                                <div class="card-body">
+                                                    <h6 class="card-title">{{ coin.upper() }}</h6>
+                                                    <div class="row">
+                                                        <div class="col-6">
+                                                            <small class="text-muted">Current Price</small>
+                                                            <div class="h6">${{ "{:,.2f}".format(pred.current_price) }}</div>
+                                                        </div>
+                                                        <div class="col-6">
+                                                            <small class="text-muted">Predicted Price</small>
+                                                            <div class="h6">${{ "{:,.2f}".format(pred.predicted_price) }}</div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="mt-2">
+                                                        <span class="badge {% if pred.predicted_change > 0 %}bg-success{% else %}bg-danger{% endif %}">
+                                                            {{ "{:+.2%}".format(pred.predicted_change) }}
+                                                        </span>
+                                                        <small class="ms-2 confidence-{% if pred.confidence > 0.7 %}high{% elif pred.confidence > 0.4 %}medium{% else %}low{% endif %}">
+                                                            Confidence: {{ "{:.1%}".format(pred.confidence) }}
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                {% else %}
+                                    <div class="text-center text-muted">
+                                        <p>No predictions available. Add coins to your favorites to see ML predictions.</p>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5>Model Performance</h5>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Our ensemble model combines Random Forest, Gradient Boosting, and Linear Regression for optimal predictions.</p>
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <div class="text-center">
+                                            <h4 class="text-primary">Random Forest</h4>
+                                            <p>Handles non-linear relationships and feature interactions</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="text-center">
+                                            <h4 class="text-success">Gradient Boosting</h4>
+                                            <p>Sequential learning for improved prediction accuracy</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="text-center">
+                                            <h4 class="text-info">Linear Regression</h4>
+                                            <p>Captures linear trends and provides interpretable results</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+            <script>
+                // Auto-refresh every 5 minutes
+                setTimeout(function() {
+                    location.reload();
+                }, 300000);
+            </script>
+        </body>
+        </html>
+        ''', predictions=predictions)
+        
+    except Exception as e:
+        return f"Error: {str(e)}", 500
+
+@app.route('/advanced-backtest')
+@login_required
+def advanced_backtest_dashboard():
+    """Advanced Backtesting Dashboard"""
+    try:
+        from advanced_backtest import AdvancedBacktester
+        
+        backtester = AdvancedBacktester()
+        
+        # Get user's favorite coins
+        user_favorites = query_db('SELECT favorites FROM users WHERE id = ?', [session['user_id']], one=True)
+        favorites = []
+        if user_favorites and user_favorites[0]:
+            favorites = json.loads(user_favorites[0])
+        
+        return render_template_string('''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Advanced Backtesting</title>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+            <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+        </head>
+        <body>
+            <div class="container-fluid mt-4">
+                <div class="row">
+                    <div class="col-12">
+                        <h2><i class="fas fa-chart-line"></i> Advanced Backtesting</h2>
+                        <p class="text-muted">Test trading strategies with historical data and machine learning</p>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5>Run Backtest</h5>
+                            </div>
+                            <div class="card-body">
+                                <form id="backtestForm">
+                                    <div class="mb-3">
+                                        <label for="coin" class="form-label">Coin</label>
+                                        <select class="form-select" id="coin" name="coin" required>
+                                            <option value="">Select a coin</option>
+                                            {% for coin in favorites %}
+                                            <option value="{{ coin }}">{{ coin.upper() }}</option>
+                                            {% endfor %}
+                                            <option value="bitcoin">Bitcoin</option>
+                                            <option value="ethereum">Ethereum</option>
+                                            <option value="cardano">Cardano</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="days" class="form-label">Days to Backtest</label>
+                                        <select class="form-select" id="days" name="days">
+                                            <option value="30">30 days</option>
+                                            <option value="60">60 days</option>
+                                            <option value="90" selected>90 days</option>
+                                            <option value="180">180 days</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Strategies to Test</label>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="rsi" name="strategies" value="rsi" checked>
+                                            <label class="form-check-label" for="rsi">RSI Strategy</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="macd" name="strategies" value="macd" checked>
+                                            <label class="form-check-label" for="macd">MACD Strategy</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="volume" name="strategies" value="volume" checked>
+                                            <label class="form-check-label" for="volume">Volume Spike Strategy</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="ma" name="strategies" value="ma" checked>
+                                            <label class="form-check-label" for="ma">Moving Average Strategy</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="ml" name="strategies" value="ml" checked>
+                                            <label class="form-check-label" for="ml">Machine Learning Strategy</label>
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">Run Backtest</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5>Strategy Descriptions</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <h6>RSI Strategy</h6>
+                                    <p class="text-muted">Buy when RSI < 30 (oversold), sell when RSI > 70 (overbought)</p>
+                                </div>
+                                <div class="mb-3">
+                                    <h6>MACD Strategy</h6>
+                                    <p class="text-muted">Buy on bullish crossover, sell on bearish crossover</p>
+                                </div>
+                                <div class="mb-3">
+                                    <h6>Volume Spike Strategy</h6>
+                                    <p class="text-muted">Buy when volume is 2x above average</p>
+                                </div>
+                                <div class="mb-3">
+                                    <h6>Moving Average Strategy</h6>
+                                    <p class="text-muted">Buy on golden cross (5MA > 20MA), sell on death cross</p>
+                                </div>
+                                <div class="mb-3">
+                                    <h6>Machine Learning Strategy</h6>
+                                    <p class="text-muted">Uses ensemble of ML models for price direction prediction</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div id="backtestResults" style="display: none;">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h5>Backtest Results</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="resultsContent"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+            <script>
+                document.getElementById('backtestForm').addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    
+                    const formData = new FormData(e.target);
+                    const data = {
+                        coin: formData.get('coin'),
+                        days: parseInt(formData.get('days')),
+                        strategies: Array.from(formData.getAll('strategies'))
+                    };
+                    
+                    // Show loading
+                    document.getElementById('backtestResults').style.display = 'block';
+                    document.getElementById('resultsContent').innerHTML = '<div class="text-center"><div class="spinner-border" role="status"></div><p>Running backtest...</p></div>';
+                    
+                    fetch('/api/run-backtest', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(data)
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            document.getElementById('resultsContent').innerHTML = '<div class="alert alert-danger">' + data.error + '</div>';
+                        } else {
+                            displayResults(data.results);
+                        }
+                    })
+                    .catch(error => {
+                        document.getElementById('resultsContent').innerHTML = '<div class="alert alert-danger">Error: ' + error.message + '</div>';
+                    });
+                });
+                
+                function displayResults(results) {
+                    let html = '<div class="table-responsive"><table class="table table-striped">';
+                    html += '<thead><tr><th>Strategy</th><th>Return</th><th>Final Value</th><th>Trades</th></tr></thead><tbody>';
+                    
+                    for (const [strategy, result] of Object.entries(results)) {
+                        const returnClass = result.total_return > 0 ? 'text-success' : 'text-danger';
+                        html += `<tr>
+                            <td>${strategy}</td>
+                            <td class="${returnClass}">${(result.total_return * 100).toFixed(2)}%</td>
+                            <td>$${result.final_value.toFixed(2)}</td>
+                            <td>${result.num_trades}</td>
+                        </tr>`;
+                    }
+                    
+                    html += '</tbody></table></div>';
+                    document.getElementById('resultsContent').innerHTML = html;
+                }
+            </script>
+        </body>
+        </html>
+        ''', favorites=favorites)
+        
+    except Exception as e:
+        return f"Error: {str(e)}", 500
+
+@app.route('/api/run-backtest', methods=['POST'])
+@login_required
+def api_run_backtest():
+    """API endpoint to run backtest"""
+    try:
+        data = request.get_json()
+        coin = data.get('coin')
+        days = data.get('days', 90)
+        
+        if not coin:
+            return jsonify({'error': 'No coin specified'}), 400
+        
+        from advanced_backtest import AdvancedBacktester
+        backtester = AdvancedBacktester()
+        results = backtester.run_comprehensive_backtest(coin, days)
+        
+        if results:
+            return jsonify({'results': results})
+        else:
+            return jsonify({'error': 'Failed to run backtest'}), 500
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     init_db() # Initialize database on startup
     app.run(debug=True, port=5001) 
