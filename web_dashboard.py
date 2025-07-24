@@ -36,6 +36,19 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        # Check if user is admin
+        db = get_db()
+        user = query_db('SELECT is_admin FROM users WHERE id = ?', [session['user_id']], one=True)
+        if not user or not user[0]:
+            return redirect(url_for('index'))
+        return f(*args, **kwargs)
+    return decorated_function
+
 # --- i18n dictionary ---
 LANGUAGES = {
     'en': {
