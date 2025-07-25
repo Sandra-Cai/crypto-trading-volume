@@ -365,6 +365,8 @@ def add_webhook_columns():
             pass
 add_webhook_columns()
 
+# ... rest of the code ...
+
 # --- Settings page for alerts ---
 @app.route('/settings', methods=['GET', 'POST'])
 @login_required
