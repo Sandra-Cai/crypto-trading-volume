@@ -5,22 +5,42 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - FLASK_ENV=development
+      - FLASK_ENV=${FLASK_ENV:-development}
       - FLASK_APP=web_dashboard.py
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-}
+      - DATABASE_PATH=${DATABASE_PATH:-users.db}
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_CACHE_EXPIRY=${REDIS_CACHE_EXPIRY:-60}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+    depends_on:
+      - redis
     restart: unless-stopped
+    volumes:
+      - .:/app
   redis:
     image: redis:7
     ports:
       - "6379:6379"
     restart: always
+    volumes:
+      - redis_data:/data
   celeryworker:
     build: .
     command: celery -A tasks worker --loglevel=info
     depends_on:
       - redis
+      - app
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REDIS_URL=redis://redis:6379/0
     volumes:
       - .:/app
-    restart: always 
+    restart: always
+
+volumes:
+  redis_data: 

@@ -28,8 +28,9 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
-app.secret_key = 'supersecretkey'  # Change this in production
-DATABASE = 'users.db'
+# Use environment variable for secret key, fallback to generated one for development
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', secrets.token_hex(32))
+DATABASE = os.environ.get('DATABASE_PATH', 'users.db')
 
 swagger = Swagger(app)
 limiter = Limiter(app, key_func=get_remote_address)

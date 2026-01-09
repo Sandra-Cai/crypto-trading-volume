@@ -401,13 +401,37 @@ The application can be deployed to various cloud platforms:
 ## Configuration
 
 ### Environment Variables
+The application supports configuration through environment variables. See `env.example` for a complete list of available options.
+
+#### Required for Production
+- `FLASK_SECRET_KEY`: Secret key for Flask sessions (required in production)
 - `FLASK_ENV`: Set to `production` for production deployment
 - `FLASK_APP`: Set to `web_dashboard.py` (default)
 
+#### Optional Configuration
+- `DATABASE_PATH`: Path to SQLite database file (default: `users.db`)
+- `REDIS_URL`: Redis connection URL for caching and Celery (default: `redis://localhost:6379/0`)
+- `REDIS_CACHE_EXPIRY`: Cache expiry time in seconds (default: `60`)
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`: Email configuration for alerts
+- `CELERY_BROKER_URL`: Celery broker URL (default: `redis://localhost:6379/0`)
+- `CELERY_RESULT_BACKEND`: Celery result backend URL (default: `redis://localhost:6379/0`)
+
+#### Quick Setup
+1. Copy `env.example` to `.env`:
+   ```bash
+   cp env.example .env
+   ```
+2. Edit `.env` and set your configuration values
+3. For production, **always** set a strong `FLASK_SECRET_KEY`:
+   ```bash
+   export FLASK_SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
+   ```
+
 ### Security Notes
+- **Always** set `FLASK_SECRET_KEY` in production (auto-generated in development)
 - Change the default username/password in `web_dashboard.py` for production
-- Use a strong secret key for Flask sessions
-- Consider using environment variables for sensitive configuration
+- Use environment variables for all sensitive configuration
+- Never commit `.env` files to version control (already in `.gitignore`)
 
 ## API Rate Limits
 The application includes caching to handle API rate limits:
