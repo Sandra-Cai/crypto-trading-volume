@@ -13,6 +13,7 @@ import hashlib
 import time
 import os
 import json
+import logging
 from werkzeug.security import generate_password_hash
 from datetime import datetime
 import secrets
@@ -26,6 +27,21 @@ from scipy.optimize import minimize
 from flasgger import Swagger, swag_from
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+
+# Load environment variables from .env file if it exists
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed, skip
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO if os.environ.get('FLASK_ENV') != 'production' else logging.WARNING,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 # Use environment variable for secret key, fallback to generated one for development
@@ -1604,6 +1620,40 @@ def sentiment_dashboard():
     </body>
     </html>
          ''', username=username, sentiment_data=sentiment_data)
+
+@app.route('/health')
+@app.route('/api/health')
+def health_check():
+    """Health check endpoint for monitoring and load balancers"""
+    try:
+        # Check database connection
+        db = get_db()
+        db.execute('SELECT 1')
+        
+        # Check Redis connection if available
+        redis_status = 'unavailable'
+        try:
+            from fetch_volume import redis_client
+            if redis_client:
+                redis_client.ping()
+                redis_status = 'connected'
+        except Exception:
+            pass
+        
+        return jsonify({
+            'status': 'healthy',
+            'timestamp': datetime.now().isoformat(),
+            'database': 'connected',
+            'redis': redis_status,
+            'version': '1.0.0'
+        }), 200
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return jsonify({
+            'status': 'unhealthy',
+            'timestamp': datetime.now().isoformat(),
+            'error': str(e)
+        }), 503
 
 @app.route('/api/sentiment/<coin>')
 def api_sentiment(coin):
@@ -5470,4 +5520,8 @@ def api_run_backtest():
 
 if __name__ == '__main__':
     init_db() # Initialize database on startup
-    app.run(debug=True, port=5001) 
+    # Load configuration from environment variables
+    debug_mode = os.environ.get('DEBUG', 'False').lower() == 'true'
+    port = int(os.environ.get('PORT', '5000'))
+    host = os.environ.get('HOST', '0.0.0.0')
+    app.run(debug=debug_mode, host=host, port=port) 

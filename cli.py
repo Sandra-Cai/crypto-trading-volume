@@ -65,7 +65,7 @@ def main():
     parser.add_argument('--detect-spikes', action='store_true', help='Detect volume spikes (20rage)')
     parser.add_argument('--correlation', action='store_true', help='Calculate price-volume correlation')
     parser.add_argument('--market-data', action='store_true', help='Show market data (cap, rank, etc.)')
-    parser.add_argument('--sentiment', action='store_true', help='Show social sentiment analysis')
+    parser.add_argument('--sentiment', action='store_true', help='Show comprehensive sentiment analysis')
     parser.add_argument('--technical', action='store_true', help='Show technical indicators (RSI, MACD)')
     parser.add_argument('--arbitrage', action='store_true', help='Detect arbitrage opportunities')
     parser.add_argument('--dominance', action='store_true', help='Show market dominance data')
@@ -74,7 +74,6 @@ def main():
     parser.add_argument('--bot-strategy', type=str, choices=['volume_spike', 'rsi', 'price_alerts', 'all'], default='all', help='Trading strategy to use')
     parser.add_argument('--backtest', action='store_true', help='Run backtest on historical data')
     parser.add_argument('--backtest-strategy', type=str, choices=['volume_spike', 'rsi'], default='volume_spike', help='Backtest strategy to use')
-    parser.add_argument('--sentiment', action='store_true', help='Show comprehensive sentiment analysis')
     args = parser.parse_args()
 
     if args.sentiment:

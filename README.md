@@ -80,7 +80,20 @@ docker run -p 5000:5000 crypto-trading-volume
    pip install -r requirements.txt
    ```
 
-3. Run the application:
+3. Set up environment variables:
+   ```bash
+   # Copy the example environment file
+   cp env.example .env
+   
+   # Edit .env and set your configuration
+   # Generate a secret key:
+   python scripts/generate_secret_key.py
+   
+   # Validate your environment:
+   python scripts/check_environment.py
+   ```
+
+4. Run the application:
    ```bash
    # Start the web dashboard
    python web_dashboard.py
@@ -283,6 +296,27 @@ python test_advanced_features.py
 python test_new_features.py
 python demo_new_features.py
 ```
+
+## Utility Scripts
+
+The project includes helpful utility scripts in the `scripts/` directory:
+
+### Generate Secret Key
+Generate a secure Flask secret key:
+```bash
+python scripts/generate_secret_key.py
+```
+
+### Check Environment
+Validate your environment configuration:
+```bash
+python scripts/check_environment.py
+```
+
+This script checks:
+- Required environment variables (in production)
+- Optional but recommended variables
+- Provides warnings and suggestions
 
 ## API Endpoints
 
@@ -488,6 +522,7 @@ The platform exposes a REST API for third-party integrations and power users.
 
 ### Endpoints
 
+- `GET /health` or `GET /api/health` — Health check endpoint for monitoring
 - `GET /api/trending` — Get trending coins (from CoinGecko)
 - `GET /api/volumes/<coin>` — Get 24h trading volumes for a coin across all exchanges
 - `GET /api/historical/<coin>` — Get historical volume data for a coin
@@ -495,8 +530,8 @@ The platform exposes a REST API for third-party integrations and power users.
 - `GET /api/onchain/<coin>` — Get on-chain stats for a coin
 - `GET /api/whale_alerts/<coin>` — Get recent whale transactions for a coin
 - `GET /api/portfolio` — Get user portfolio (favorites); requires API key
-- **NEW: `GET /api/sentiment/<coin>` — Get comprehensive sentiment analysis for a coin**
-- **NEW: `POST /api/sentiment/batch` — Get sentiment analysis for multiple coins**
+- `GET /api/sentiment/<coin>` — Get comprehensive sentiment analysis for a coin
+- `POST /api/sentiment/batch` — Get sentiment analysis for multiple coins
 
 ### Authentication
 
