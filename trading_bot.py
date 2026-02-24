@@ -389,6 +389,11 @@ def create_advanced_strategy_config():
         }
     }
 
+
+# Backward-compatible alias
+create_strategy_config = create_advanced_strategy_config
+
+
 # Legacy TradingBot class for backward compatibility
 class TradingBot(AdvancedTradingBot):
     def __init__(self, strategy_config, demo_mode=True):

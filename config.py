@@ -3,6 +3,12 @@ Configuration management for crypto-trading-volume application.
 Loads configuration from environment variables with sensible defaults.
 """
 import os
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 from typing import Optional
 
 

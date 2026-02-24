@@ -1,6 +1,7 @@
 import argparse
 from fetch_volume import (
-    fetch_coingecko_trending, fetch_all_volumes, fetch_all_historical, 
+    fetch_coingecko_trending, fetch_all_volumes, fetch_all_historical,
+    fetch_price_history,
     detect_volume_spike, calculate_price_volume_correlation, fetch_market_data,
     fetch_social_sentiment, calculate_rsi, calculate_macd, detect_arbitrage_opportunities,
     fetch_market_dominance
@@ -12,6 +13,7 @@ import asyncio
 import websockets
 import json
 from backtest import backtest_volume_spike, backtest_rsi
+from utils import format_currency, format_large_number
 
 def fetch_price(symbol):
     url = f'https://api.coingecko.com/api/v3/simple/price?ids={symbol.lower()}&vs_currencies=usd'
@@ -20,14 +22,6 @@ def fetch_price(symbol):
         return None
     data = response.json()
     return data.get(symbol.lower(), {}).get('usd')
-
-def fetch_price_history(symbol, days=7):
-    url = f'https://api.coingecko.com/api/v3/coins/{symbol.lower()}/market_chart?vs_currency=usd&days={days}'
-    response = requests.get(url)
-    if response.status_code != 200:
-        return []
-    data = response.json()
-    return [price[1] for price in data['prices']]
 
 def load_portfolio(filename):
     portfolio = []
@@ -62,7 +56,7 @@ def main():
     parser.add_argument('--alert-volume', type=float, help='Alert if volume exceeds this value')
     parser.add_argument('--alert-price', type=float, help='Alert if price exceeds this value')
     parser.add_argument('--portfolio', type=str, help='Path to portfolio CSV file (columns: coin,amount)')
-    parser.add_argument('--detect-spikes', action='store_true', help='Detect volume spikes (20rage)')
+    parser.add_argument('--detect-spikes', action='store_true', help='Detect volume spikes (20x average)')
     parser.add_argument('--correlation', action='store_true', help='Calculate price-volume correlation')
     parser.add_argument('--market-data', action='store_true', help='Show market data (cap, rank, etc.)')
     parser.add_argument('--sentiment', action='store_true', help='Show comprehensive sentiment analysis')
@@ -173,16 +167,16 @@ def main():
             price = fetch_price(coin)
             volumes = fetch_all_volumes(symbol)
             value = price * amount if price else 0
-            print(f'{symbol}: {amount} coins, Price: {price if price else "N/A"} USD, Value: {value:,.2f} USD')
+            print(f'{symbol}: {amount} coins, Price: {format_currency(price) if price else "N/A"}, Value: {format_currency(value)}')
             for ex in total_volumes:
                 vol = volumes[ex]
                 if vol:
                     total_volumes[ex] += vol * amount
             total_value += value
-        print(f'Total Portfolio Value: {total_value:,.2f} USD')
+        print(f'Total Portfolio Value: {format_currency(total_value)}')
         print('Total Portfolio Volume (amount-weighted):')
         for ex, vol in total_volumes.items():
-            print(f'  {ex}: {vol:,.2f}')
+            print(f'  {ex}: {format_large_number(vol)}')
         return
 
     if args.coin:
@@ -196,7 +190,7 @@ def main():
         symbol = coin.upper()
         volumes = fetch_all_volumes(symbol)
         price = fetch_price(coin)
-        print(f'{symbol} (Price: {price if price else "N/A"} USD):')
+        print(f'{symbol} (Price: {format_currency(price) if price else "N/A"}):')
         
         if args.exchange == 'all':
             for ex, vol in volumes.items():
@@ -204,7 +198,7 @@ def main():
                     print(f'  {ex}: Unavailable (API error)')
                     failed_exchanges.add(ex)
                 else:
-                    print(f'  {ex}: {vol:,.2f}')
+                    print(f'  {ex}: {format_large_number(vol)}')
                 row = {'coin': symbol, 'exchange': ex, 'price_usd': price, 'volume': vol}
                 if args.trend:
                     hist = fetch_all_historical(symbol)
@@ -223,7 +217,7 @@ def main():
                 print(f'  {args.exchange}: Unavailable (API error)')
                 failed_exchanges.add(args.exchange)
             else:
-                print(f'  {args.exchange}: {vol:,.2f}')
+                print(f'  {args.exchange}: {format_large_number(vol)}')
             row = {'coin': symbol, 'exchange': args.exchange, 'price_usd': price, 'volume': vol}
             if args.trend:
                 hist = fetch_all_historical(symbol)

@@ -99,6 +99,27 @@ def fetch_market_data(symbol):
             return await fetch_market_data_async(symbol, session)
     return asyncio.run(wrapper())
 
+
+def fetch_price_history(symbol, days=7):
+    """Fetch historical price data for a coin from CoinGecko. Returns list of prices."""
+    key = f'price_history_{symbol}_{days}'
+    cached = cache_get(key)
+    if cached:
+        return cached
+    url = f'https://api.coingecko.com/api/v3/coins/{symbol.lower()}/market_chart?vs_currency=usd&days={days}'
+    try:
+        response = requests.get(url)
+        if response.status_code != 200:
+            return []
+        data = response.json()
+        prices = [p[1] for p in data.get('prices', [])]
+        cache_set(key, prices)
+        return prices
+    except Exception as e:
+        logger.error(f"Exception fetching price history for {symbol}: {e}")
+        return []
+
+
 # --- Async Market Dominance ---
 async def fetch_market_dominance_async(session):
     key = 'market_dominance'
