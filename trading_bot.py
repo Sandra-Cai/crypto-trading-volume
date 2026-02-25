@@ -10,8 +10,12 @@ from fetch_volume import (
     fetch_all_historical, calculate_macd
 )
 import websockets
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.preprocessing import StandardScaler
+try:
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.preprocessing import StandardScaler
+except Exception:  # Handles ImportError and binary compatibility issues
+    RandomForestRegressor = None
+    StandardScaler = None
 import pickle
 import os
 
@@ -31,7 +35,7 @@ class AdvancedTradingBot:
         self.trade_history = []
         self.is_running = False
         self.ml_model = None
-        self.scaler = StandardScaler()
+        self.scaler = StandardScaler() if StandardScaler is not None else None
         self.risk_metrics = {
             'max_position_size': 0.1,  # Max 10% of portfolio in single position
             'stop_loss': 0.05,  # 5% stop loss
@@ -121,6 +125,9 @@ class AdvancedTradingBot:
     
     def train_ml_model(self, coin, days=30):
         """Train a machine learning model for price prediction"""
+        if RandomForestRegressor is None or self.scaler is None:
+            print("ML components are unavailable; skipping model training.")
+            return False
         try:
             # Get historical data
             hist_data = fetch_all_historical(coin.upper(), days=days)
