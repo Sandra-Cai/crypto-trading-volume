@@ -10,6 +10,21 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
+def safe_getenv(name: str, default: Optional[str] = None, required: bool = False) -> Optional[str]:
+    """
+    Safely read an environment variable.
+
+    - If the variable is missing and required=True, a warning is logged.
+    - If the variable is missing and required=False, default is returned.
+    """
+    value = os.environ.get(name)
+    if value is None:
+        if required:
+            logger.warning("Required environment variable %s is not set", name)
+        return default
+    return value
+
+
 def generate_secret_key() -> str:
     """Generate a secure secret key for Flask."""
     return secrets.token_hex(32)
