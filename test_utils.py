@@ -11,6 +11,7 @@ from utils import (
     validate_exchange_name,
     get_timestamp,
     generate_secret_key,
+    validate_environment,
 )
 
 
@@ -89,4 +90,45 @@ def test_generate_secret_key():
     assert isinstance(key, str)
     assert len(key) == 64
     assert all(c in "0123456789abcdef" for c in key)
+
+
+def test_validate_environment_development(monkeypatch):
+    # In development, missing FLASK_SECRET_KEY should not mark config as invalid
+    monkeypatch.setenv("FLASK_ENV", "development")
+    monkeypatch.delenv("FLASK_SECRET_KEY", raising=False)
+    result = validate_environment()
+    assert result["valid"] is True
+    assert "FLASK_SECRET_KEY" not in result["missing_required"]
+
+
+def test_validate_environment_production_missing_required(monkeypatch):
+    # In production, missing FLASK_SECRET_KEY should fail validation
+    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.delenv("FLASK_SECRET_KEY", raising=False)
+    result = validate_environment()
+    assert result["valid"] is False
+    assert "FLASK_SECRET_KEY" in result["missing_required"]
+    assert any("FLASK_SECRET_KEY" in msg for msg in result["errors"])
+
+
+def test_validate_environment_production_all_set(monkeypatch):
+    # In production, having all required variables should pass validation
+    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.setenv("FLASK_SECRET_KEY", "super-secret")
+    # Optional variables can be set to any non-empty values
+    optional_vars = [
+        "REDIS_URL",
+        "SMTP_HOST",
+        "SMTP_USER",
+        "SMTP_PASSWORD",
+        "DATABASE_PATH",
+        "CELERY_BROKER_URL",
+    ]
+    for name in optional_vars:
+        monkeypatch.setenv(name, "value")
+
+    result = validate_environment()
+    assert result["valid"] is True
+    assert result["missing_required"] == []
+    assert result["errors"] == []
 
