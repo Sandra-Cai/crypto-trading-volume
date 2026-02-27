@@ -25,4 +25,8 @@ EXPOSE 5000
 ENV FLASK_APP=web_dashboard.py
 ENV FLASK_ENV=production
 
+# Health check for container orchestration
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" || exit 1
+
 CMD ["python", "web_dashboard.py"] 
